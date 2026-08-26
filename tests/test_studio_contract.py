@@ -142,6 +142,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert 'src="/ui/i18n.js"' in ui
     assert ui.index('id="task-status-bar"') < ui.index('id="workspace"')
     assert 'id="generation-chip"' not in ui
+    assert 'class="task-status-copy"\n              role="status"' in ui
+    assert 'id="task-status-progress"\n              role="progressbar"' in ui
+    assert 'stream.setAttribute("aria-valuenow", String(progress))' in ui
+    assert '$("elapsed").hidden = false;\n              uiText("elapsed", "历史")' in ui
     assert logo.is_file()
     assert 'rel="icon" href="/ui/index-voice-logo.svg"' in ui
     assert 'class="brand-logo"' in ui

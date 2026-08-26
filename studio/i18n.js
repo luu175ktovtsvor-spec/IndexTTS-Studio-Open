@@ -461,6 +461,13 @@
       "حالة المهمة الحالية",
     ],
     [
+      "生成进度",
+      "Generation progress",
+      "生成進捗",
+      "Progreso de generación",
+      "تقدم الإنشاء",
+    ],
+    [
       "等待参考声音",
       "Waiting for reference voice",
       "参照音声待ち",

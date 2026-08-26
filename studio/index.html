@@ -2900,11 +2900,15 @@
           class="task-status-bar waiting"
           id="task-status-bar"
           aria-label="当前任务状态"
-          aria-live="polite"
         >
           <div class="task-status-main">
             <i class="task-status-dot" aria-hidden="true"></i>
-            <div class="task-status-copy">
+            <div
+              class="task-status-copy"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            >
               <strong id="generate-status">等待参考声音</strong
               ><span id="generation-detail">先添加参考声音，再输入台词。</span>
             </div>
@@ -2924,7 +2928,11 @@
             <div
               class="task-status-progress"
               id="task-status-progress"
-              aria-live="polite"
+              role="progressbar"
+              aria-label="生成进度"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
             >
               <div class="task-status-progress-head">
                 <span class="token-stream-title"
@@ -4142,7 +4150,11 @@
           processed =
             next === "complete"
               ? total
-              : Math.max(0, Math.min(Number(token.processed) || 0, total));
+              : Math.max(0, Math.min(Number(token.processed) || 0, total)),
+          progress = Math.round(
+            Math.max(0, Math.min(Number(state.generationProgress) || 0, 1)) *
+              100,
+          );
         stream.classList.remove("streaming", "complete", "failed");
         if (next === "queued" || next === "generating")
           stream.classList.add("streaming");
@@ -4162,11 +4174,8 @@
               })
             : tr("{count} 段", { count: token.totalSegments })
           : "—";
-        $("token-progress").style.width =
-          Math.round(
-            Math.max(0, Math.min(Number(state.generationProgress) || 0, 1)) *
-              100,
-          ) + "%";
+        $("token-progress").style.width = progress + "%";
+        stream.setAttribute("aria-valuenow", String(progress));
       }
       function updateActions() {
         const ready = Boolean(state.voiceFile && $("text").value.trim());
@@ -5628,6 +5637,7 @@
                 "已载入历史结果",
                 "这是已经生成过的音频。",
               );
+              $("elapsed").hidden = false;
               uiText("elapsed", "历史");
               $("result-stage").scrollIntoView({
                 behavior: "smooth",
