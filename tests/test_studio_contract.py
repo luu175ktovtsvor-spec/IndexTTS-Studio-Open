@@ -97,7 +97,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
         "token-count",
         "token-progress",
         "token-stage",
-        "token-stream",
+        "task-status-bar",
+        "task-status-progress",
+        "task-status-action",
+        "result-panel",
         "language",
         "experimental-text",
         "emotion-file",
@@ -137,6 +140,8 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert all(f'data-mode="{mode}"' in ui for mode in range(4))
     assert all(f'data-ui-locale="{locale}"' in ui for locale in ("zh", "en", "ja", "es", "ar"))
     assert 'src="/ui/i18n.js"' in ui
+    assert ui.index('id="task-status-bar"') < ui.index('id="workspace"')
+    assert 'id="generation-chip"' not in ui
     assert logo.is_file()
     assert 'rel="icon" href="/ui/index-voice-logo.svg"' in ui
     assert 'class="brand-logo"' in ui
