@@ -4,7 +4,7 @@
 
 # IndexTTS Studio
 
-[简体中文](README.md) · [English](README_EN.md)
+[简体中文](README.md) · [English](README_EN.md) · [日本語](README_JA.md) · [Español](README_ES.md) · [العربية](README_AR.md)
 
 **A local multilingual voice workspace powered by IndexTTS 2.5**
 

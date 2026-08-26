@@ -4,7 +4,7 @@
 
 # IndexTTS Studio
 
-[简体中文](README.md) · [English](README_EN.md)
+[简体中文](README.md) · [English](README_EN.md) · [日本語](README_JA.md) · [Español](README_ES.md) · [العربية](README_AR.md)
 
 **基于 IndexTTS 2.5 的本地多语言声音工作台**
 
