@@ -2223,6 +2223,31 @@
         min-width: 120px;
         min-height: 42px;
       }
+      .preset-confirm-dialog {
+        width: min(430px, calc(100vw - 28px));
+      }
+      .preset-confirm-name {
+        display: block;
+        margin-top: 2px;
+        padding: 12px 13px;
+        overflow-wrap: anywhere;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        color: var(--text);
+        background: var(--surface);
+        font-size: 14px;
+      }
+      .preset-confirm-warning {
+        margin: 11px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .primary.danger {
+        border-color: rgba(255, 129, 126, 0.45);
+        background: linear-gradient(105deg, #d9525a, #f07168);
+        box-shadow: 0 13px 24px rgba(185, 56, 65, 0.24);
+      }
       .toast.error {
         border-color: rgba(255, 129, 126, 0.4);
         background: rgba(82, 38, 44, 0.96);
@@ -2490,15 +2515,27 @@
           border-bottom: 1px solid var(--line);
         }
         .studio {
-          padding: 12px;
+          padding: 12px 12px 88px;
         }
         .generate-wrap {
-          position: static;
+          position: fixed;
+          z-index: 30;
+          right: 14px;
+          bottom: 14px;
+          left: 84px;
           margin: 0;
-          padding: 0;
-          border: 0;
-          background: none;
-          backdrop-filter: none;
+          padding: 8px;
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          background: var(--raised);
+          backdrop-filter: blur(12px);
+          box-shadow: 0 12px 34px rgba(58, 24, 120, 0.3);
+        }
+        .generate-wrap .generate-hint {
+          display: none;
+        }
+        .toast {
+          bottom: 82px;
         }
       }
       @media (max-width: 900px) {
@@ -2561,6 +2598,10 @@
         }
         .rail {
           display: none;
+        }
+        .generate-wrap {
+          right: 12px;
+          left: 12px;
         }
         .studio-toolbar {
           align-items: flex-start;
@@ -3777,6 +3818,42 @@
         </div>
       </div>
     </dialog>
+    <dialog
+      class="record-dialog preset-confirm-dialog"
+      id="preset-confirm-dialog"
+      aria-labelledby="preset-confirm-title"
+      aria-describedby="preset-confirm-description"
+    >
+      <header class="record-dialog-head">
+        <div>
+          <h2 id="preset-confirm-title">确认操作</h2>
+          <p id="preset-confirm-description">请确认是否继续。</p>
+        </div>
+        <button
+          class="icon-button"
+          id="preset-confirm-close"
+          type="button"
+          aria-label="关闭确认窗口"
+        >
+          ×
+        </button>
+      </header>
+      <div class="record-dialog-body">
+        <strong class="preset-confirm-name" id="preset-confirm-name" dir="auto"
+          >—</strong
+        >
+        <p class="preset-confirm-warning" id="preset-confirm-warning">
+          此操作可能影响已保存的数据。
+        </p>
+        <div class="record-dialog-actions">
+          <button class="secondary" id="preset-confirm-cancel" type="button">
+            取消</button
+          ><button class="primary" id="preset-confirm-submit" type="button">
+            确认
+          </button>
+        </div>
+      </div>
+    </dialog>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <script src="/ui/i18n.js"></script>
     <script>
@@ -3843,6 +3920,8 @@
         },
         statusStream: null,
         savingPreset: false,
+        presetConfirmAction: null,
+        presetConfirmReturnFocus: null,
         serviceAvailable: true,
         modelAvailable: null,
         exportFormat: "wav",
@@ -3939,14 +4018,17 @@
             data = null;
           }
         }
-        if (!response.ok)
-          throw new Error(
+        if (!response.ok) {
+          const error = new Error(
             trRuntime(
               data?.detail ||
                 fallback ||
                 tr("请求失败（HTTP {status}）", { status: response.status }),
             ),
           );
+          error.status = response.status;
+          throw error;
+        }
         return data;
       }
       function formatTime(value) {
@@ -5019,8 +5101,10 @@
             label.textContent = name;
             load.textContent = tr("载入");
             remove.textContent = tr("删除");
+            load.setAttribute("aria-label", tr("载入「{name}」", { name }));
+            remove.setAttribute("aria-label", tr("删除「{name}」", { name }));
             load.addEventListener("click", () => loadPreset(name));
-            remove.addEventListener("click", () => deletePreset(name));
+            remove.addEventListener("click", () => requestDeletePreset(name));
             actions.append(load, remove);
             row.append(label, actions);
             holder.append(row);
@@ -5098,6 +5182,50 @@
           toast(error.message || "载入预设失败", true);
         }
       }
+      function closePresetConfirm() {
+        const returnFocus = state.presetConfirmReturnFocus;
+        state.presetConfirmAction = null;
+        state.presetConfirmReturnFocus = null;
+        const dialog = $("preset-confirm-dialog");
+        if (dialog.open) dialog.close();
+        if (returnFocus?.isConnected) returnFocus.focus();
+      }
+      function openPresetConfirm(kind, name, action) {
+        const deleting = kind === "delete";
+        uiText(
+          "preset-confirm-title",
+          deleting ? "删除已保存的声音" : "覆盖已保存的声音",
+        );
+        uiText(
+          "preset-confirm-description",
+          deleting
+            ? "确定要删除这个已保存的声音吗？"
+            : "已存在同名声音，是否用当前声音和设置覆盖？",
+        );
+        uiText(
+          "preset-confirm-warning",
+          deleting ? "此操作不能撤销。" : "原来的声音和设置将被替换。",
+        );
+        uiText("preset-confirm-submit", deleting ? "删除" : "覆盖");
+        uiRawText("preset-confirm-name", name);
+        $("preset-confirm-submit").classList.toggle("danger", deleting);
+        state.presetConfirmAction = action;
+        state.presetConfirmReturnFocus = document.activeElement;
+        const dialog = $("preset-confirm-dialog");
+        if (!dialog.open) dialog.showModal();
+        $("preset-confirm-cancel").focus();
+      }
+      function requestDeletePreset(name) {
+        openPresetConfirm("delete", name, () => deletePreset(name));
+      }
+      function requestOverwritePreset(name) {
+        openPresetConfirm("overwrite", name, () => savePreset(true));
+      }
+      async function confirmPresetAction() {
+        const action = state.presetConfirmAction;
+        closePresetConfirm();
+        if (action) await action();
+      }
       async function deletePreset(name) {
         try {
           await jsonRequest(
@@ -5111,13 +5239,14 @@
           toast(error.message || "删除预设失败", true);
         }
       }
-      async function savePreset() {
+      async function savePreset(overwrite = false) {
         if (!state.voiceFile) return toast("先添加一段参考声音。", true);
         const name = $("preset-name").value.trim();
         if (!name) return toast("先给这个声音取一个名字。", true);
         const form = new FormData();
         form.append("name", name);
         form.append("settings", JSON.stringify(settings()));
+        form.append("overwrite", String(overwrite));
         form.append("prompt_audio", state.voiceFile);
         if (state.emotionFile) form.append("emotion_audio", state.emotionFile);
         state.savingPreset = true;
@@ -5132,6 +5261,10 @@
           toast("音色预设已保存。");
           await loadPresets();
         } catch (error) {
+          if (!overwrite && error.status === 409) {
+            requestOverwritePreset(name);
+            return;
+          }
           toast(error.message || "保存预设失败", true);
         } finally {
           state.savingPreset = false;
@@ -5839,6 +5972,25 @@
           else if (!recordDevicePicker.contains(event.target))
             closeRecordDevicePicker();
         });
+        $("preset-confirm-close").addEventListener(
+          "click",
+          closePresetConfirm,
+        );
+        $("preset-confirm-cancel").addEventListener(
+          "click",
+          closePresetConfirm,
+        );
+        $("preset-confirm-submit").addEventListener("click", () =>
+          confirmPresetAction(),
+        );
+        $("preset-confirm-dialog").addEventListener("cancel", (event) => {
+          event.preventDefault();
+          closePresetConfirm();
+        });
+        $("preset-confirm-dialog").addEventListener("click", (event) => {
+          if (event.target === $("preset-confirm-dialog"))
+            closePresetConfirm();
+        });
         navigator.mediaDevices?.addEventListener?.("devicechange", () => {
           if ($("record-dialog").open && !state.requestingMic)
             void refreshAudioInputs(false);
@@ -6080,7 +6232,9 @@
         $("segment-tokens").addEventListener("input", previewSegments);
         $("generate").addEventListener("click", generate);
         $("preset-name").addEventListener("input", updateActions);
-        $("save-preset-confirm").addEventListener("click", savePreset);
+        $("save-preset-confirm").addEventListener("click", () =>
+          savePreset(false),
+        );
         $("refresh-presets").addEventListener("click", () => {
           loadPresets();
           toast("已刷新已保存的声音。");

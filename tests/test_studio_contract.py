@@ -74,6 +74,14 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
         "voice-file",
         "reference-start",
         "record-dialog",
+        "preset-confirm-dialog",
+        "preset-confirm-title",
+        "preset-confirm-description",
+        "preset-confirm-name",
+        "preset-confirm-warning",
+        "preset-confirm-close",
+        "preset-confirm-cancel",
+        "preset-confirm-submit",
         "audio-input-device",
         "record-device-trigger",
         "record-device-menu",
@@ -197,6 +205,11 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert "暂停参考声音" in i18n and "取消静音" in i18n
     assert '$("emotion-mode").value = enabled ? "3" : "0"' in ui
     assert 'if (enabled) $("emotion-text").focus()' in ui
+    assert "requestDeletePreset(name)" in ui
+    assert "requestOverwritePreset(name)" in ui
+    assert 'form.append("overwrite", String(overwrite))' in ui
+    assert "error.status === 409" in ui
+    assert "preset_exists(clean_name) and not overwrite" in server
     assert 'class="volume-icon-on"' in ui
     assert 'class="volume-icon-muted"' in ui
     assert 'volumeButton.classList.toggle("is-muted", muted)' in ui
@@ -426,6 +439,25 @@ def test_preset_names_are_bounded_and_path_safe() -> None:
     assert safe_preset_name("../voice") == "voice"
     assert 'id="preset-name"' in ui and 'maxlength="60"' in ui
     assert studio_server.MAX_PRESET_NAME_CHARS == 60
+
+
+def test_preset_overwrite_requires_explicit_confirmation() -> None:
+    with patch("studio_server.preset_exists", return_value=True):
+        try:
+            asyncio.run(
+                studio_server.create_preset(
+                    name="existing-voice",
+                    settings="{}",
+                    overwrite=False,
+                    prompt_audio=None,
+                    emotion_audio=None,
+                )
+            )
+        except HTTPException as error:
+            assert error.status_code == 409
+            assert error.detail == "已存在同名声音，请确认是否覆盖"
+        else:
+            raise AssertionError("existing presets must require overwrite confirmation")
 
 
 def test_feature_inventory_counts_and_routes() -> None:

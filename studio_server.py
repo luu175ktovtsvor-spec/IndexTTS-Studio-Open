@@ -38,6 +38,7 @@ from indextts.utils.presets import (
     get_presets_dir,
     list_presets,
     load_preset,
+    preset_exists,
     save_preset,
 )
 from studio_engine import MacIndexTTS2
@@ -817,6 +818,7 @@ def remove_preset(name: str) -> dict[str, bool]:
 async def create_preset(
     name: str = Form(...),
     settings: str = Form(...),
+    overwrite: bool = Form(False),
     prompt_audio: UploadFile | None = File(None),
     emotion_audio: UploadFile | None = File(None),
 ) -> dict[str, Any]:
@@ -825,6 +827,11 @@ async def create_preset(
         raise HTTPException(status_code=400, detail="请先给这个声音取一个名字")
     if len(clean_name) > MAX_PRESET_NAME_CHARS:
         raise HTTPException(status_code=400, detail="声音名称不能超过 60 个字符")
+    if preset_exists(clean_name) and not overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail="已存在同名声音，请确认是否覆盖",
+        )
     prompt_path = None
     emotion_path = None
     try:
