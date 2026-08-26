@@ -3786,6 +3786,14 @@
       const trRuntime = (value) => uiI18n.runtime(value);
       const uiText = (idOrElement, source, vars) =>
         uiI18n.setText(idOrElement, source, vars);
+      const uiRawText = (idOrElement, value) => {
+        const element =
+          typeof idOrElement === "string" ? $(idOrElement) : idOrElement;
+        if (!element) return;
+        delete element.dataset.i18nKey;
+        delete element.dataset.i18nVars;
+        element.textContent = value;
+      };
       function readStoredValue(key, fallback = "") {
         try {
           return localStorage.getItem(key) ?? fallback;
@@ -4214,14 +4222,16 @@
         source.src = state.sourceUrl;
         source.load();
         $("source-preview").hidden = false;
-        $("source-label").textContent = file.name;
-        $("voice-file-name").textContent = file.name;
-        $("voice-name").textContent = file.name.replace(/\.[^.]+$/, "");
+        uiRawText("source-label", file.name);
+        uiRawText("voice-file-name", file.name);
+        uiRawText("voice-name", file.name.replace(/\.[^.]+$/, ""));
         ["voice-name", "voice-file-name", "source-label"].forEach(
           (id) => ($(id).title = file.name),
         );
-        $("voice-meta").textContent =
-          formatBytes(file.size) + " · " + tr("已准备作为声音克隆参考");
+        uiRawText(
+          "voice-meta",
+          formatBytes(file.size) + " · " + tr("已准备作为声音克隆参考"),
+        );
         uiText("voice-state", "已准备");
         $("voice-state").classList.add("ready");
         updateWorkflow();
@@ -4270,9 +4280,9 @@
       function setEmotionFile(file, keepInput) {
         state.emotionFile = file || null;
         if (!keepInput) $("emotion-file").value = "";
-        $("emotion-file-label").textContent = state.emotionFile
-          ? state.emotionFile.name
-          : tr("可选");
+        if (state.emotionFile)
+          uiRawText("emotion-file-label", state.emotionFile.name);
+        else uiText("emotion-file-label", "可选");
         $("emotion-file-label").title = state.emotionFile?.name || "";
         $("remove-emotion-file").disabled = !state.emotionFile;
       }
@@ -4493,7 +4503,7 @@
         $("choose-voice").disabled = true;
         $("remove-voice").disabled = true;
         $("voice-file").disabled = true;
-        $("recording-device-name").textContent = deviceName;
+        uiRawText("recording-device-name", deviceName);
         $("recording-session").hidden = false;
         state.recordingStartedAt = Date.now();
         const updateClock = () => {
@@ -5244,7 +5254,7 @@
         state.audioFilename = name;
         outputAudio.src = url;
         outputAudio.load();
-        $("result-name").textContent = name;
+        uiRawText("result-name", name);
         $("audio-player").classList.remove("disabled");
         $("result-empty").hidden = true;
         updateActions();

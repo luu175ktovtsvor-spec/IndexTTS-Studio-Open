@@ -181,6 +181,19 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     )
     assert re.search(r'id="result-name"[^>]*dir="auto"', ui)
     assert 'c.dir = "ltr"' in ui
+    assert "const uiRawText" in ui
+    assert all(
+        re.search(rf'uiRawText\(\s*"{element_id}"', ui)
+        for element_id in (
+            "source-label",
+            "voice-file-name",
+            "voice-name",
+            "voice-meta",
+            "emotion-file-label",
+            "recording-device-name",
+            "result-name",
+        )
+    )
     assert "暂停参考声音" in i18n and "取消静音" in i18n
     assert '$("emotion-mode").value = enabled ? "3" : "0"' in ui
     assert 'if (enabled) $("emotion-text").focus()' in ui
