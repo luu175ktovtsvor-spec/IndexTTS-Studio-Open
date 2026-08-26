@@ -9,6 +9,8 @@ from io import BytesIO
 import math
 from pathlib import Path
 import re
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -25,6 +27,25 @@ from indextts.utils.presets import safe_preset_name
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_audio_dependency_imports_are_free_of_known_deprecation_warnings() -> None:
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"librosa==0.11.0"' in project
+    assert '"sentencepiece>=0.2.2"' in project
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-W",
+            "error::DeprecationWarning",
+            "-c",
+            "import sentencepiece; import librosa.core.intervals",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _translation_rows(source: str) -> list[list[str]]:
