@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-label="IndexTTS Studio">
+  <defs>
+    <linearGradient id="tile" x1="10" y1="6" x2="55" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#D58AFF"/>
+      <stop offset="0.52" stop-color="#995EFF"/>
+      <stop offset="1" stop-color="#5D39D8"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientTransform="translate(20 15) rotate(48) scale(44)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.42"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="3" y="3" width="58" height="58" rx="18" fill="url(#tile)"/>
+  <rect x="3.75" y="3.75" width="56.5" height="56.5" rx="17.25" fill="none" stroke="#FFFFFF" stroke-opacity="0.22" stroke-width="1.5"/>
+  <rect x="3" y="3" width="58" height="58" rx="18" fill="url(#glow)"/>
+  <circle cx="32" cy="32" r="20" fill="#241442" fill-opacity="0.18" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="1.5"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round">
+    <path d="M18 32v4"/>
+    <path d="M25 25v14"/>
+    <path d="M32 20v24"/>
+    <path d="M39 25v14"/>
+    <path d="M46 30v4"/>
+  </g>
+  <circle cx="20" cy="15" r="4" fill="#FFFFFF" fill-opacity="0.5"/>
+</svg>
