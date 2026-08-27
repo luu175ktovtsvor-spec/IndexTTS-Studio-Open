@@ -742,6 +742,15 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert 'GRADIO_CACHE_DIR="${APP_ROOT}/outputs/gradio-cache"' in native
     assert "export GRADIO_TEMP_DIR" in native
     assert "clean_gradio_cache" in native
+    assert 'NATIVE_STARTUP_URL="${NATIVE_URL}/gradio_api/startup-events"' in native
+    assert "native_is_ready" in native
+    assert 'export NO_PROXY="$loopback_no_proxy"' in native
+    assert 'export no_proxy="$loopback_no_proxy"' in native
+    assert 'tail -n 0 -f "$NATIVE_STDERR_LOG" >&2 &' in native
+    assert '2>>"$NATIVE_STDERR_LOG"' in native
+    assert "stop_stderr_stream" in native
+    assert "preserve_child_stderr" in native
+    assert "native-webui-last-error.log" in native
     assert "delete_cache=(300, 900)" in webui
     assert "tqdm.set_lock(threading.RLock())" in webui
     assert "signal.signal(signal.SIGTERM, _handle_sigterm)" in webui
