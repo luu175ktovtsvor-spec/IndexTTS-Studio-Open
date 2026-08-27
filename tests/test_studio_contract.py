@@ -746,6 +746,7 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert "tqdm.set_lock(threading.RLock())" in webui
     assert "signal.signal(signal.SIGTERM, _handle_sigterm)" in webui
     assert "demo.close(verbose=False)" in webui
+    assert "from studio_engine import MacIndexTTS2 as IndexTTS2" in webui
     assert 'output_path = str(GRADIO_CACHE_DIR / f"spk_' in webui
     assert 'os.path.join("outputs", f"spk_' not in webui
     assert "--extra studio --extra test --locked python -m pytest" in tests

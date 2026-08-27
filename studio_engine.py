@@ -1,4 +1,4 @@
-"""Apple-silicon compatibility layer for the optional IndexTTS Studio UI."""
+"""Shared Apple-silicon runtime for the local IndexTTS interfaces."""
 
 from __future__ import annotations
 

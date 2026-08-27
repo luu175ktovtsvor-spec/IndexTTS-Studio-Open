@@ -113,7 +113,10 @@ from indextts.utils.presets import list_presets, save_preset, load_preset, delet
 from tools.i18n.i18n import I18nAuto
 
 if IS_V25:
-    from indextts.infer_v2_5 import IndexTTS2
+    # Share Studio's Apple-silicon compatibility path. MPS still handles the
+    # main model while BigVGAN uses CPU, avoiding MPS's 65,536-channel limit
+    # on longer generated clips.
+    from studio_engine import MacIndexTTS2 as IndexTTS2
 else:
     from indextts.infer_v2 import IndexTTS2
 
