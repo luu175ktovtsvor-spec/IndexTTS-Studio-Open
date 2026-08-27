@@ -146,6 +146,8 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 Ambas páginas pueden estar abiertas a la vez, pero usan procesos de modelo separados, por lo que el inicio doble no es predeterminado. Cerrar cada terminal detiene de forma segura su servicio.
 
+El audio temporal de la WebUI original se limita a `outputs/gradio-cache` dentro del proyecto. Se limpia antes del inicio y tras una salida normal; durante la ejecución, Gradio elimina periódicamente la caché de más de 15 minutos. No se limpian carpetas temporales compartidas del sistema.
+
 Ejecuta las pruebas reproducibles de Studio:
 
 ```bash

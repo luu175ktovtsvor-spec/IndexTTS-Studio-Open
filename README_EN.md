@@ -146,6 +146,8 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 Both pages can be open together, but they use separate model processes, so dual launch is not the default. Closing either launch terminal safely stops its service.
 
+Temporary native-WebUI audio is scoped to this project at `outputs/gradio-cache`. It is cleared before launch and after a normal exit; Gradio periodically removes cache older than 15 minutes while running. Shared system temp folders are never cleaned.
+
 Run the reproducible Studio regression suite:
 
 ```bash

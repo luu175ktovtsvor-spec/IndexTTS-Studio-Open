@@ -56,6 +56,8 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 Studio 与原生 WebUI 可同时打开，但会使用两个独立模型进程并增加内存占用，因此默认启动器只启动 Studio。关闭对应启动终端即可停止该服务。
 
+原生 WebUI 的上传与生成副本只进入 `outputs/gradio-cache`。启动前、正常退出后自动清空；运行期间每 5 分钟检查并删除超过 15 分钟的缓存。清理逻辑会校验路径，只处理本项目目录，不触碰系统共享 `/tmp/gradio` 或其他应用文件。
+
 回归测试命令：
 
 ```bash

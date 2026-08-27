@@ -146,6 +146,8 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 两套界面可以同时打开，但会使用两个独立模型进程，因此不会默认双开。退出各自的启动终端即可安全停止对应服务。
 
+原生 WebUI 的临时音频只写入本项目的 `outputs/gradio-cache`；启动前和正常退出后会清空，运行中超过 15 分钟的缓存由 Gradio 定期删除。不会清理系统共享临时目录。
+
 运行 Studio 回归测试：
 
 ```bash

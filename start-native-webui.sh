@@ -30,6 +30,24 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"${NATIVE_PORT}" -sTCP:LIST
   exit 1
 fi
 
+APP_ROOT="$(pwd -P)"
+GRADIO_CACHE_DIR="${APP_ROOT}/outputs/gradio-cache"
+export GRADIO_TEMP_DIR="$GRADIO_CACHE_DIR"
+
+clean_gradio_cache() {
+  local expected="${APP_ROOT}/outputs/gradio-cache"
+  if [[ "$GRADIO_CACHE_DIR" != "$expected" ]]; then
+    echo "Refusing to clean an unexpected Gradio cache path."
+    return 1
+  fi
+  if [[ -L "$GRADIO_CACHE_DIR" || ( -e "$GRADIO_CACHE_DIR" && ! -d "$GRADIO_CACHE_DIR" ) ]]; then
+    unlink "$GRADIO_CACHE_DIR"
+  fi
+  mkdir -p "$GRADIO_CACHE_DIR"
+  find -P "$GRADIO_CACHE_DIR" -mindepth 1 -depth -delete
+}
+
+clean_gradio_cache
 echo "Starting the optional upstream Gradio WebUI at ${NATIVE_URL}"
 echo "Studio remains the default interface. Running both model processes can use more memory."
 uv run --extra webui --locked python webui.py --host 127.0.0.1 --port "$NATIVE_PORT" &
@@ -41,13 +59,16 @@ stop_server() {
     for _ in {1..32}; do
       if ! kill -0 "$server_pid" >/dev/null 2>&1; then
         wait "$server_pid" 2>/dev/null || true
-        return
+        break
       fi
       sleep 0.25
     done
-    kill -KILL "$server_pid" >/dev/null 2>&1 || true
-    wait "$server_pid" 2>/dev/null || true
+    if kill -0 "$server_pid" >/dev/null 2>&1; then
+      kill -KILL "$server_pid" >/dev/null 2>&1 || true
+      wait "$server_pid" 2>/dev/null || true
+    fi
   fi
+  clean_gradio_cache
 }
 trap stop_server EXIT INT TERM
 

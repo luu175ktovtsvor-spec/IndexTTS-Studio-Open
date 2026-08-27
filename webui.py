@@ -16,6 +16,10 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
 sys.path.append(os.path.join(current_dir, "indextts"))
 
+from indextts.utils.gradio_cache import configure_application_gradio_cache
+
+GRADIO_CACHE_DIR = configure_application_gradio_cache(current_dir)
+
 import argparse
 parser = argparse.ArgumentParser(
     description="IndexTTS WebUI",
@@ -636,7 +640,7 @@ def gen_single(emo_control_method,prompt, text,
                 *args, progress=gr.Progress()):
     output_path = None
     if not output_path:
-        output_path = os.path.join("outputs", f"spk_{int(time.time())}.wav")
+        output_path = str(GRADIO_CACHE_DIR / f"spk_{int(time.time())}.wav")
     # set gradio progress
     tts.gr_progress = progress
     do_sample, top_p, top_k, temperature, \
@@ -700,6 +704,7 @@ def create_experimental_warning_message():
 
 with gr.Blocks(
     title=f"IndexTTS-{cmd_args.version} Demo",
+    delete_cache=(300, 900),
     css="""
         /* Make the voice reference audio upload area more compact. */
         #prompt_audio_compact .audio-container,

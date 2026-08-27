@@ -26,6 +26,10 @@ from starlette.datastructures import Headers
 
 import studio_server
 from indextts.infer_v2_5 import IndexTTS2, apply_pronunciation_annotations
+from indextts.utils.gradio_cache import (
+    application_gradio_cache,
+    clear_application_gradio_cache,
+)
 from indextts.utils.model_integrity import inspect_model_directory
 from indextts.utils.presets import safe_preset_name
 
@@ -735,8 +739,28 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'default="127.0.0.1"' in webui
     assert "--host 127.0.0.1" in native
+    assert 'GRADIO_CACHE_DIR="${APP_ROOT}/outputs/gradio-cache"' in native
+    assert "export GRADIO_TEMP_DIR" in native
+    assert "clean_gradio_cache" in native
+    assert "delete_cache=(300, 900)" in webui
+    assert 'output_path = str(GRADIO_CACHE_DIR / f"spk_' in webui
+    assert 'os.path.join("outputs", f"spk_' not in webui
     assert "--extra studio --extra test --locked python -m pytest" in tests
     assert '"httpx==0.28.1"' in project and '"pytest>=7.0"' in project
+
+
+def test_gradio_cache_cleanup_is_scoped_to_the_application() -> None:
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        root = Path(temporary_directory)
+        cache = application_gradio_cache(root)
+        nested = cache / "generated" / "spk-test.wav"
+        nested.parent.mkdir(parents=True)
+        nested.write_bytes(b"private-audio")
+        sibling = root / "outputs" / "keep.wav"
+        sibling.write_bytes(b"user-output")
+        assert clear_application_gradio_cache(root) == 1
+        assert cache.is_dir() and not list(cache.iterdir())
+        assert sibling.read_bytes() == b"user-output"
 
 
 def test_model_work_uses_daemon_threads() -> None:
