@@ -8,12 +8,14 @@ All generation options map directly to the installed IndexTTS 2.5 API.
 from __future__ import annotations
 
 import asyncio
+from array import array
 import json
 import math
 import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -21,18 +23,23 @@ import uuid
 import wave
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import uvicorn
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from indextts.utils.examples_downloader import ensure_examples_available
+from indextts.utils.model_integrity import (
+    REQUIRED_MODEL_FILES,
+    inspect_model_directory,
+)
 from indextts.utils.presets import (
     delete_preset,
     get_presets_dir,
@@ -44,9 +51,11 @@ from indextts.utils.presets import (
 from studio_engine import MacIndexTTS2
 
 ROOT = Path(__file__).resolve().parent
-CHECKPOINTS = Path(
-    os.environ.get("INDEXTTS_CHECKPOINTS_DIR", str(ROOT / "checkpoints"))
-).expanduser().resolve()
+CHECKPOINTS = (
+    Path(os.environ.get("INDEXTTS_CHECKPOINTS_DIR", str(ROOT / "checkpoints")))
+    .expanduser()
+    .resolve()
+)
 OUTPUT_ROOT = ROOT / "outputs"
 OUTPUTS = OUTPUT_ROOT / "studio"
 UPLOADS = OUTPUTS / "uploads"
@@ -57,6 +66,9 @@ EXAMPLES = ROOT / "examples"
 MAX_AUDIO_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = 1024 * 1024 * 1024
 MAX_PRESET_NAME_CHARS = 60
+MAX_TEXT_CHARS = 20_000
+MAX_HISTORY_ITEMS = 100
+MAX_HISTORY_BYTES = 5 * 1024 * 1024 * 1024
 REFERENCE_WINDOW_SECONDS = 15.0
 MAX_REFERENCE_START_SECONDS = 24 * 60 * 60
 OUTPUT_TARGET_LOUDNESS_LUFS = -18
@@ -77,21 +89,6 @@ SUPPORTED_MEDIA_EXTENSIONS = {
     ".avi",
     ".mkv",
 }
-REQUIRED_CHECKPOINT_FILES = (
-    "config.yaml",
-    "gpt.pth",
-    "s2mel.pth",
-    "codec.pth",
-    "feat1.pt",
-    "feat2.pt",
-    "multilingual_zh_ja_yue_char_del.tiktoken",
-    "wav2vec2bert_stats.pt",
-    "qwen0.6bemo4-merge/model.safetensors",
-    "hf_cache/bigvgan/bigvgan_generator.pt",
-    "hf_cache/campplus_cn_common.bin",
-    "hf_cache/semantic_codec/model.safetensors",
-    "hf_cache/w2v-bert-2.0/model.safetensors",
-)
 ALLOWED_LANGUAGES = {"ZH", "EN", "JA", "ES", "AR"}
 EXPORT_FORMATS: dict[str, dict[str, Any]] = {
     "wav": {
@@ -142,6 +139,38 @@ for stale_upload in UPLOADS.iterdir():
         stale_upload.unlink(missing_ok=True)
 
 app = FastAPI(title="IndexTTS Studio", docs_url=None, redoc_url=None)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"],
+)
+
+
+def _is_local_origin(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and parsed.hostname in {
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "testserver",
+    }
+
+
+@app.middleware("http")
+async def protect_local_mutations(request: Request, call_next):
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        fetch_site = request.headers.get("sec-fetch-site", "").lower()
+        if fetch_site == "cross-site" or (origin and not _is_local_origin(origin)):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "只允许从本机 IndexTTS Studio 发起修改操作"},
+            )
+    return await call_next(request)
+
+
 app.mount("/ui", StaticFiles(directory=STATIC), name="ui")
 app.mount("/examples", StaticFiles(directory=EXAMPLES), name="examples")
 app.mount(
@@ -156,11 +185,14 @@ _model_loading = False
 _model_error: str | None = None
 _model_lock = threading.Lock()
 _generation_lock = threading.Lock()
+_active_generation_lock = threading.Lock()
 _generation_status_lock = threading.Lock()
 _examples_lock = threading.Lock()
 _export_encoders_lock = threading.Lock()
 _shutdown_requested = threading.Event()
 _export_encoders: set[str] | None = None
+_active_generation_job_id: str | None = None
+_active_generation_cancel: threading.Event | None = None
 _generation_status: dict[str, Any] = {
     "state": "idle",
     "message": "等待生成",
@@ -181,6 +213,41 @@ _generation_status: dict[str, Any] = {
 }
 
 
+class GenerationCancelled(RuntimeError):
+    """Raised inside the worker when the active local task is cancelled."""
+
+
+def _claim_generation_job(job_id: str) -> threading.Event | None:
+    global _active_generation_cancel, _active_generation_job_id
+    with _active_generation_lock:
+        if _active_generation_job_id is not None:
+            return None
+        _active_generation_job_id = job_id
+        _active_generation_cancel = threading.Event()
+        return _active_generation_cancel
+
+
+def _release_generation_job(job_id: str) -> None:
+    global _active_generation_cancel, _active_generation_job_id
+    with _active_generation_lock:
+        if _active_generation_job_id == job_id:
+            _active_generation_job_id = None
+            _active_generation_cancel = None
+
+
+def _request_generation_cancel() -> str | None:
+    with _active_generation_lock:
+        if _active_generation_job_id is None or _active_generation_cancel is None:
+            return None
+        _active_generation_cancel.set()
+        return _active_generation_job_id
+
+
+def _raise_if_cancelled(cancel_event: threading.Event) -> None:
+    if cancel_event.is_set() or _shutdown_requested.is_set():
+        raise GenerationCancelled("生成已取消")
+
+
 async def _run_in_daemon_thread(function, *args):
     """Run blocking model work without preventing the local process from exiting."""
     loop = asyncio.get_running_loop()
@@ -190,12 +257,14 @@ async def _run_in_daemon_thread(function, *args):
         try:
             result = function(*args)
         except BaseException as error:
+
             def finish_error(captured=error) -> None:
                 if not future.done():
                     future.set_exception(captured)
 
             callback = finish_error
         else:
+
             def finish_success(captured=result) -> None:
                 if not future.done():
                     future.set_result(captured)
@@ -257,7 +326,11 @@ def _available_export_formats() -> list[dict[str, str]]:
                     for line in result.stdout.splitlines()
                     if len((parts := line.split())) >= 2 and len(parts[0]) == 6
                 }
-            except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            except (
+                FileNotFoundError,
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+            ):
                 _export_encoders = set()
     return [
         {
@@ -310,14 +383,26 @@ def _normalize_generated_audio(path: Path) -> None:
         if not normalized.is_file() or normalized.stat().st_size <= 44:
             raise RuntimeError("音量处理没有生成有效音频")
         normalized.replace(path)
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
         raise RuntimeError("生成音频音量处理失败，请检查 ffmpeg") from error
     finally:
         normalized.unlink(missing_ok=True)
 
 
+def _checkpoint_integrity(*, verify_hashes: bool = False) -> dict[str, Any]:
+    return inspect_model_directory(CHECKPOINTS, verify_hashes=verify_hashes)
+
+
 def _missing_checkpoint_files() -> list[str]:
-    return [name for name in REQUIRED_CHECKPOINT_FILES if not (CHECKPOINTS / name).is_file()]
+    return _checkpoint_integrity()["missing"]
+
+
+def _invalid_checkpoint_files() -> list[dict[str, str]]:
+    return _checkpoint_integrity()["invalid"]
 
 
 def _model_state() -> str:
@@ -325,6 +410,8 @@ def _model_state() -> str:
         return "ready"
     if _missing_checkpoint_files():
         return "missing"
+    if _invalid_checkpoint_files():
+        return "invalid"
     if _model_loading:
         return "loading"
     if _model_error:
@@ -339,6 +426,12 @@ def _load_model() -> MacIndexTTS2:
         raise RuntimeError(
             f"模型权重未安装完整（缺少 {len(missing)} 个关键文件）。"
             "请先下载 IndexTeam/IndexTTS-2.5 模型权重。"
+        )
+    invalid = _invalid_checkpoint_files()
+    if invalid:
+        raise RuntimeError(
+            f"模型权重校验失败（{len(invalid)} 个文件异常）。"
+            "请重新下载 IndexTeam/IndexTTS-2.5 模型权重。"
         )
     with _model_lock:
         if _model is None:
@@ -371,6 +464,27 @@ def _generation_snapshot() -> dict[str, Any]:
         return dict(_generation_status)
 
 
+def _reset_generation_status(message: str = "等待生成") -> None:
+    _set_generation_status(
+        state="idle",
+        message=message,
+        startedAt=None,
+        filename=None,
+        error=None,
+        jobId=None,
+        stage="idle",
+        progress=0.0,
+        tokenProgress={
+            "processed": 0,
+            "total": 0,
+            "currentSegment": 0,
+            "totalSegments": 0,
+            "activeTokens": 0,
+            "message": message,
+        },
+    )
+
+
 def _url_for(path: str | Path | None) -> str | None:
     if not path:
         return None
@@ -387,6 +501,60 @@ def _url_for(path: str | Path | None) -> str | None:
     return None
 
 
+def _generation_files() -> list[Path]:
+    return sorted(
+        (path for path in GENERATIONS.glob("*.wav") if path.is_file()),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _history_summary() -> dict[str, int]:
+    files = _generation_files()
+    return {
+        "count": len(files),
+        "totalBytes": sum(path.stat().st_size for path in files),
+        "maxItems": MAX_HISTORY_ITEMS,
+        "maxBytes": MAX_HISTORY_BYTES,
+    }
+
+
+def _prune_generation_history(protected: Path | None = None) -> list[str]:
+    protected_path = protected.resolve() if protected else None
+    removed: list[str] = []
+    retained_count = 0
+    retained_bytes = 0
+    for path in _generation_files():
+        resolved = path.resolve()
+        size = path.stat().st_size
+        keep = resolved == protected_path or (
+            retained_count < MAX_HISTORY_ITEMS
+            and retained_bytes + size <= MAX_HISTORY_BYTES
+        )
+        if keep:
+            retained_count += 1
+            retained_bytes += size
+            continue
+        path.unlink(missing_ok=True)
+        removed.append(path.name)
+    return removed
+
+
+def _generation_path(filename: str) -> Path:
+    safe_filename = Path(filename).name
+    if safe_filename != filename or not safe_filename.lower().endswith(".wav"):
+        raise HTTPException(status_code=400, detail="无效的历史文件名")
+    path = (GENERATIONS / safe_filename).resolve()
+    try:
+        path.relative_to(GENERATIONS)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail="无效的历史文件名") from error
+    return path
+
+
+_prune_generation_history()
+
+
 def _save_upload(
     upload: UploadFile | None,
     label: str,
@@ -401,9 +569,7 @@ def _save_upload(
     is_video = (upload.content_type or "").lower().startswith("video/") or (
         extension in VIDEO_MEDIA_EXTENSIONS
     )
-    max_upload_bytes = (
-        MAX_VIDEO_UPLOAD_BYTES if is_video else MAX_AUDIO_UPLOAD_BYTES
-    )
+    max_upload_bytes = MAX_VIDEO_UPLOAD_BYTES if is_video else MAX_AUDIO_UPLOAD_BYTES
     size_error = "视频文件不能超过 1 GB" if is_video else "音频文件不能超过 100 MB"
     stem = f"{int(time.time())}-{label}-{uuid.uuid4().hex[:8]}"
     source = UPLOADS / f"{stem}.source{extension}"
@@ -446,7 +612,11 @@ def _save_upload(
         source.unlink(missing_ok=True)
         converted.unlink(missing_ok=True)
         raise
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
         source.unlink(missing_ok=True)
         converted.unlink(missing_ok=True)
         raise HTTPException(
@@ -469,6 +639,106 @@ def _remove_temporary_uploads(*paths: str | None) -> None:
         candidate.unlink(missing_ok=True)
 
 
+def _dbfs(value: float) -> float:
+    return round(20 * math.log10(max(value, 1e-12)), 1)
+
+
+def _analyze_reference_audio(path: str | Path) -> dict[str, Any]:
+    with wave.open(str(path), "rb") as source:
+        rate = source.getframerate()
+        channels = source.getnchannels()
+        width = source.getsampwidth()
+        frames = source.getnframes()
+        raw = source.readframes(frames)
+    if width != 2 or channels != 1 or rate <= 0:
+        raise RuntimeError("参考声音格式分析失败")
+    samples = array("h")
+    samples.frombytes(raw)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    normalized = [sample / 32768.0 for sample in samples]
+    duration = frames / rate if rate else 0.0
+    if not normalized:
+        return {
+            "quality": "poor",
+            "duration": 0.0,
+            "rmsDbfs": -120.0,
+            "peakDbfs": -120.0,
+            "silenceRatio": 1.0,
+            "clippingRatio": 0.0,
+            "issues": ["no-audible-speech"],
+            "fatal": True,
+        }
+
+    rms = math.sqrt(sum(value * value for value in normalized) / len(normalized))
+    peak = max(abs(value) for value in normalized)
+    clipping_ratio = sum(abs(value) >= 0.99 for value in normalized) / len(normalized)
+    window_size = max(1, rate // 10)
+    silent_windows = 0
+    window_count = 0
+    for start in range(0, len(normalized), window_size):
+        window = normalized[start : start + window_size]
+        if not window:
+            continue
+        window_count += 1
+        window_rms = math.sqrt(sum(value * value for value in window) / len(window))
+        if _dbfs(window_rms) <= -45:
+            silent_windows += 1
+    silence_ratio = silent_windows / window_count if window_count else 1.0
+    rms_dbfs = _dbfs(rms)
+    peak_dbfs = _dbfs(peak)
+    issues: list[str] = []
+    fatal = False
+
+    if duration < 0.8:
+        issues.append("too-short")
+        fatal = True
+    elif duration < 3:
+        issues.append("very-short")
+    elif duration < 8:
+        issues.append("short")
+    if rms_dbfs <= -55 or silence_ratio >= 0.95:
+        issues.append("no-audible-speech")
+        fatal = True
+    elif rms_dbfs < -40:
+        issues.append("too-quiet")
+    elif rms_dbfs < -30:
+        issues.append("quiet")
+    if clipping_ratio > 0.02:
+        issues.append("heavy-clipping")
+    elif clipping_ratio > 0.001:
+        issues.append("clipping")
+    if silence_ratio > 0.6 and "no-audible-speech" not in issues:
+        issues.append("much-silence")
+    elif silence_ratio > 0.25:
+        issues.append("some-silence")
+
+    poor_codes = {
+        "too-short",
+        "no-audible-speech",
+        "too-quiet",
+        "heavy-clipping",
+        "much-silence",
+    }
+    quality = (
+        "poor"
+        if any(code in poor_codes for code in issues)
+        else "warning"
+        if issues
+        else "good"
+    )
+    return {
+        "quality": quality,
+        "duration": round(duration, 2),
+        "rmsDbfs": rms_dbfs,
+        "peakDbfs": peak_dbfs,
+        "silenceRatio": round(silence_ratio, 4),
+        "clippingRatio": round(clipping_ratio, 6),
+        "issues": issues,
+        "fatal": fatal,
+    }
+
+
 def _split_narration_units(
     text: str,
     sentence_pause_ms: int,
@@ -489,9 +759,7 @@ def _split_narration_units(
         ]
         for index, sentence in enumerate(sentences):
             pause_ms = (
-                paragraph_pause_ms
-                if index == len(sentences) - 1
-                else sentence_pause_ms
+                paragraph_pause_ms if index == len(sentences) - 1 else sentence_pause_ms
             )
             units.append((sentence, pause_ms))
     if units:
@@ -529,10 +797,7 @@ def _concatenate_wavs_with_pauses(
                 if pause_ms > 0 and expected_format is not None:
                     silence_frames = expected_format[2] * pause_ms // 1000
                     destination.writeframes(
-                        b"\0"
-                        * expected_format[0]
-                        * expected_format[1]
-                        * silence_frames
+                        b"\0" * expected_format[0] * expected_format[1] * silence_frames
                     )
     except Exception:
         output_path.unlink(missing_ok=True)
@@ -560,7 +825,9 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
         try:
             value = float(source.get(key, default))
         except (TypeError, ValueError) as error:
-            raise HTTPException(status_code=400, detail=f"设置项 {key} 不是有效数字") from error
+            raise HTTPException(
+                status_code=400, detail=f"设置项 {key} 不是有效数字"
+            ) from error
         if not math.isfinite(value) or not minimum <= value <= maximum:
             raise HTTPException(
                 status_code=400,
@@ -600,9 +867,13 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
         try:
             value = float(raw_value)
         except (TypeError, ValueError) as error:
-            raise HTTPException(status_code=400, detail=f"第 {index} 个情绪强度无效") from error
+            raise HTTPException(
+                status_code=400, detail=f"第 {index} 个情绪强度无效"
+            ) from error
         if not math.isfinite(value) or not 0.0 <= value <= 1.0:
-            raise HTTPException(status_code=400, detail=f"第 {index} 个情绪强度必须在 0 到 1 之间")
+            raise HTTPException(
+                status_code=400, detail=f"第 {index} 个情绪强度必须在 0 到 1 之间"
+            )
         normalized_vector.append(value)
     advanced = settings.get("advanced", {})
     if not isinstance(advanced, dict):
@@ -627,12 +898,8 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "duration": number(settings, "duration", 1.0, 0.5, 2.0),
         "segmentTokens": integer(settings, "segmentTokens", 120, 20, 600),
         "naturalPacing": boolean(settings, "naturalPacing", False),
-        "sentencePauseMs": integer(
-            settings, "sentencePauseMs", 320, 0, 2000
-        ),
-        "paragraphPauseMs": integer(
-            settings, "paragraphPauseMs", 650, 0, 4000
-        ),
+        "sentencePauseMs": integer(settings, "sentencePauseMs", 320, 0, 2000),
+        "paragraphPauseMs": integer(settings, "paragraphPauseMs", 650, 0, 4000),
         "advanced": {
             "doSample": boolean(advanced, "doSample", True),
             "topP": number(advanced, "topP", 0.8, 0.0, 1.0),
@@ -640,9 +907,7 @@ def _normalize_settings(settings: dict[str, Any]) -> dict[str, Any]:
             "temperature": number(advanced, "temperature", 0.8, 0.1, 2.0),
             "lengthPenalty": number(advanced, "lengthPenalty", 0.0, -2.0, 2.0),
             "numBeams": integer(advanced, "numBeams", 3, 1, 10),
-            "repetitionPenalty": number(
-                advanced, "repetitionPenalty", 10.0, 0.1, 20.0
-            ),
+            "repetitionPenalty": number(advanced, "repetitionPenalty", 10.0, 0.1, 20.0),
             "maxMelTokens": integer(advanced, "maxMelTokens", 1500, 50, 1815),
         },
     }
@@ -668,12 +933,15 @@ def home() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict[str, Any]:
     missing = _missing_checkpoint_files()
+    invalid = _invalid_checkpoint_files()
     return {
         "ready": _model is not None,
-        "modelAvailable": not missing,
+        "modelAvailable": not missing and not invalid,
         "modelState": _model_state(),
         "model": "IndexTTS 2.5",
         "localOnly": True,
+        "missingModelFiles": missing,
+        "invalidModelFiles": invalid,
     }
 
 
@@ -681,35 +949,45 @@ def health() -> dict[str, Any]:
 def status() -> dict[str, Any]:
     """Return real generation state so a reloaded workbench can recover its preview."""
     snapshot = _generation_snapshot()
-    if snapshot.get("state") == "complete" and snapshot.get("filename") and not (GENERATIONS / snapshot["filename"]).exists():
-        _set_generation_status(
-            state="idle",
-            message="等待生成",
-            startedAt=None,
-            filename=None,
-            error=None,
-            jobId=None,
-            stage="idle",
-            progress=0.0,
-            tokenProgress={
-                "processed": 0,
-                "total": 0,
-                "currentSegment": 0,
-                "totalSegments": 0,
-                "activeTokens": 0,
-                "message": "等待生成",
-            },
-        )
+    if (
+        snapshot.get("state") == "complete"
+        and snapshot.get("filename")
+        and not (GENERATIONS / snapshot["filename"]).exists()
+    ):
+        _reset_generation_status()
         snapshot = _generation_snapshot()
     missing = _missing_checkpoint_files()
+    invalid = _invalid_checkpoint_files()
     return {
         "model": "IndexTTS-2.5",
         "modelReady": _model is not None,
-        "modelAvailable": not missing,
+        "modelAvailable": not missing and not invalid,
         "modelState": _model_state(),
         "missingModelFiles": missing,
+        "invalidModelFiles": invalid,
         "generation": snapshot,
     }
+
+
+@app.post("/api/model-integrity")
+async def verify_model_integrity() -> dict[str, Any]:
+    return await _run_in_daemon_thread(
+        lambda: _checkpoint_integrity(verify_hashes=True)
+    )
+
+
+@app.post("/api/generation/cancel")
+def cancel_generation() -> dict[str, Any]:
+    job_id = _request_generation_cancel()
+    if job_id is None:
+        return {"cancelled": False, "state": "idle", "jobId": None}
+    _set_generation_status(
+        state="cancelling",
+        message="正在取消生成",
+        stage="cancelling",
+        jobId=job_id,
+    )
+    return {"cancelled": True, "state": "cancelling", "jobId": job_id}
 
 
 @app.get("/api/status-stream")
@@ -788,9 +1066,15 @@ def export_audio(filename: str, format: str = "wav") -> FileResponse:
             check=True,
             timeout=90,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+    except (
+        FileNotFoundError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
         _cleanup_export(converted)
-        raise HTTPException(status_code=500, detail="音频格式转换失败，请检查 ffmpeg") from error
+        raise HTTPException(
+            status_code=500, detail="音频格式转换失败，请检查 ffmpeg"
+        ) from error
     return FileResponse(
         converted,
         media_type=config["mediaType"],
@@ -879,16 +1163,45 @@ async def create_preset(
         _remove_temporary_uploads(prompt_path, emotion_path)
 
 
+@app.post("/api/reference-quality")
+async def reference_quality(
+    reference_start: float = Form(0.0),
+    prompt_audio: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    if not math.isfinite(reference_start):
+        reference_start = 0.0
+    reference_start = max(0.0, min(reference_start, MAX_REFERENCE_START_SECONDS))
+    prompt_path = None
+    try:
+        prompt_path = _save_upload(
+            prompt_audio,
+            "quality",
+            start_seconds=reference_start,
+        )
+        if not prompt_path:
+            raise HTTPException(status_code=400, detail="请先添加参考声音")
+        return _analyze_reference_audio(prompt_path)
+    finally:
+        _remove_temporary_uploads(prompt_path)
+
+
 @app.post("/api/segments")
 async def segments(payload: dict[str, Any]) -> dict[str, Any]:
     text = str(payload.get("text", "")).strip()
     if not text:
         return {"segments": []}
+    if len(text) > MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"台词不能超过 {MAX_TEXT_CHARS} 个字符",
+        )
     normalized = _normalize_settings(payload)
     try:
         model = await _run_in_daemon_thread(_load_model)
     except asyncio.CancelledError as error:
-        raise HTTPException(status_code=503, detail="服务正在停止，请稍后重新启动") from error
+        raise HTTPException(
+            status_code=503, detail="服务正在停止，请稍后重新启动"
+        ) from error
     except Exception as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     language = normalized["language"].lower()
@@ -942,12 +1255,26 @@ async def generate(
     prompt_audio: UploadFile | None = File(None),
     emotion_audio: UploadFile | None = File(None),
 ) -> dict[str, Any]:
-    if not text.strip():
+    clean_text = text.strip()
+    if not clean_text:
         raise HTTPException(status_code=400, detail="请输入台词")
+    if len(clean_text) > MAX_TEXT_CHARS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"台词不能超过 {MAX_TEXT_CHARS} 个字符",
+        )
+    job_id = uuid.uuid4().hex[:8]
+    cancel_event = _claim_generation_job(job_id)
+    if cancel_event is None:
+        raise HTTPException(
+            status_code=409,
+            detail="已有生成任务正在运行，请等待完成或先取消当前任务",
+        )
     prompt_path = None
     emotion_path = None
-    normalized = _normalize_settings(_settings_payload(settings))
+    reference_analysis: dict[str, Any] | None = None
     try:
+        normalized = _normalize_settings(_settings_payload(settings))
         prompt_path = _save_upload(
             prompt_audio,
             "voice",
@@ -955,12 +1282,18 @@ async def generate(
         )
         if not prompt_path:
             raise HTTPException(status_code=400, detail="请上传或录制参考声音")
+        reference_analysis = _analyze_reference_audio(prompt_path)
+        if reference_analysis["fatal"]:
+            raise HTTPException(
+                status_code=400,
+                detail="参考声音中没有足够的清晰人声，请重新录制或选择片段",
+            )
         emotion_path = _save_upload(emotion_audio, "emotion")
     except Exception:
         _remove_temporary_uploads(prompt_path, emotion_path)
+        _release_generation_job(job_id)
         raise
     output_path = GENERATIONS / f"voice-{int(time.time())}-{uuid.uuid4().hex[:8]}.wav"
-    job_id = uuid.uuid4().hex[:8]
     _set_generation_status(
         state="queued",
         message="已收到任务，正在等待模型",
@@ -983,10 +1316,17 @@ async def generate(
     def run() -> None:
         token_counts: list[int] = []
         try:
+            _raise_if_cancelled(cancel_event)
             model = _load_model()
+            _raise_if_cancelled(cancel_event)
             advanced = normalized["advanced"]
-            vector = model.normalize_emo_vec(normalized["emotionVector"], apply_bias=True) if normalized["emotionMode"] == 2 else None
+            vector = (
+                model.normalize_emo_vec(normalized["emotionVector"], apply_bias=True)
+                if normalized["emotionMode"] == 2
+                else None
+            )
             with _generation_lock:
+                _raise_if_cancelled(cancel_event)
                 prefix = f"<|{normalized['language'].lower()}|> "
                 max_tokens = max(
                     20,
@@ -1016,7 +1356,7 @@ async def generate(
                 else:
                     planned_units = []
                     planned_segments = model.split_text_by_tokens(
-                        text.strip(), max_tokens, prefix
+                        clean_text, max_tokens, prefix
                     )
                 token_counts = [
                     len(model.tokenizer.encode(prefix + segment, allowed_special="all"))
@@ -1051,12 +1391,15 @@ async def generate(
                     previous_progress = model.gr_progress
                     model.gr_progress = progress_callback
                     try:
+                        _raise_if_cancelled(cancel_event)
                         model.infer(
                             spk_audio_prompt=prompt_path,
                             text=segment_text,
                             lang=normalized["language"],
                             output_path=str(segment_output),
-                            emo_audio_prompt=emotion_path if normalized["emotionMode"] == 1 else None,
+                            emo_audio_prompt=emotion_path
+                            if normalized["emotionMode"] == 1
+                            else None,
                             emo_alpha=normalized["emotionWeight"],
                             emo_vector=vector,
                             use_emo_text=normalized["emotionMode"] == 3,
@@ -1087,6 +1430,7 @@ async def generate(
                         for unit_index, (segment_text, pause_ms) in enumerate(
                             planned_units
                         ):
+                            _raise_if_cancelled(cancel_event)
                             current_segment = unit_index + 1
                             active_tokens = token_counts[unit_index]
                             processed_before = sum(token_counts[:unit_index])
@@ -1100,6 +1444,7 @@ async def generate(
                                 processed_before=processed_before,
                                 unit_index=unit_index,
                             ) -> None:
+                                _raise_if_cancelled(cancel_event)
                                 message = (
                                     f"第 {current_segment}/{total_segments} 段"
                                     f" · 当前 {active_tokens} Token"
@@ -1119,9 +1464,7 @@ async def generate(
                                         " · 正在保存音频"
                                     )
                                     stage = "saving"
-                                local_progress = max(
-                                    0.0, min(float(value), 1.0)
-                                )
+                                local_progress = max(0.0, min(float(value), 1.0))
                                 _set_generation_status(
                                     state="generating",
                                     message=message,
@@ -1162,6 +1505,7 @@ async def generate(
                 else:
 
                     def on_progress(value: float, desc: str = "") -> None:
+                        _raise_if_cancelled(cancel_event)
                         processed = 0
                         current_segment = 0
                         active_tokens = 0
@@ -1204,13 +1548,16 @@ async def generate(
                         )
 
                     infer_to_path(
-                        text.strip(),
+                        clean_text,
                         output_path,
                         on_progress,
                         interval_silence=200,
                     )
+                _raise_if_cancelled(cancel_event)
                 if not output_path.is_file() or output_path.stat().st_size <= 44:
-                    raise RuntimeError("模型没有生成有效音频，请调整台词或参考声音后重试")
+                    raise RuntimeError(
+                        "模型没有生成有效音频，请调整台词或参考声音后重试"
+                    )
                 _set_generation_status(
                     state="generating",
                     message="正在调整播放音量",
@@ -1219,6 +1566,18 @@ async def generate(
                     jobId=job_id,
                 )
                 _normalize_generated_audio(output_path)
+                _raise_if_cancelled(cancel_event)
+        except GenerationCancelled:
+            output_path.unlink(missing_ok=True)
+            _set_generation_status(
+                state="cancelled",
+                message="生成已取消",
+                stage="cancelled",
+                error=None,
+                filename=None,
+                jobId=job_id,
+            )
+            raise
         except Exception as error:
             output_path.unlink(missing_ok=True)
             _set_generation_status(
@@ -1231,6 +1590,7 @@ async def generate(
             raise
         else:
             total_tokens = sum(token_counts)
+            _prune_generation_history(protected=output_path)
             _set_generation_status(
                 state="complete",
                 message="音频已生成",
@@ -1250,12 +1610,22 @@ async def generate(
             )
         finally:
             _remove_temporary_uploads(prompt_path, emotion_path)
+            _release_generation_job(job_id)
 
     try:
         await _run_in_daemon_thread(run)
-        return {"audioUrl": _url_for(output_path), "filename": output_path.name}
+        return {
+            "audioUrl": _url_for(output_path),
+            "filename": output_path.name,
+            "referenceQuality": reference_analysis,
+        }
     except asyncio.CancelledError as error:
-        raise HTTPException(status_code=503, detail="服务正在停止，请稍后重新启动") from error
+        cancel_event.set()
+        raise HTTPException(
+            status_code=503, detail="服务正在停止，请稍后重新启动"
+        ) from error
+    except GenerationCancelled as error:
+        raise HTTPException(status_code=409, detail="生成已取消") from error
     except HTTPException:
         raise
     except Exception as error:
@@ -1279,14 +1649,19 @@ def examples() -> list[dict[str, Any]]:
                 {
                     "name": f"案例 {index:02d} · {item.get('lang', 'ZH')}",
                     "audio": f"/examples/{quote(prompt_name)}",
-                    "emotionAudio": f"/examples/{quote(emotion_name)}" if emotion_name else None,
+                    "emotionAudio": f"/examples/{quote(emotion_name)}"
+                    if emotion_name
+                    else None,
                     "available": available,
                     "text": item.get("text", ""),
                     "language": item.get("lang", "ZH"),
                     "mode": int(item.get("emo_mode", 0)),
                     "emotionWeight": float(item.get("emo_weight", 0.65)),
                     "emotionText": item.get("emo_text", ""),
-                    "emotionVector": [float(item.get(f"emo_vec_{vector_index}", 0.0)) for vector_index in range(1, 9)],
+                    "emotionVector": [
+                        float(item.get(f"emo_vec_{vector_index}", 0.0))
+                        for vector_index in range(1, 9)
+                    ],
                 }
             )
     return cases
@@ -1295,7 +1670,8 @@ def examples() -> list[dict[str, Any]]:
 @app.get("/api/history")
 def history() -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for path in sorted(GENERATIONS.glob("*.wav"), key=lambda item: item.stat().st_mtime, reverse=True):
+    _prune_generation_history()
+    for path in _generation_files():
         try:
             with wave.open(str(path), "rb") as source:
                 duration = round(source.getnframes() / source.getframerate(), 2)
@@ -1310,6 +1686,48 @@ def history() -> list[dict[str, Any]]:
             }
         )
     return records
+
+
+@app.get("/api/history-summary")
+def history_summary() -> dict[str, int]:
+    _prune_generation_history()
+    return _history_summary()
+
+
+@app.delete("/api/history/{filename}")
+def remove_history_item(filename: str) -> dict[str, Any]:
+    path = _generation_path(filename)
+    snapshot = _generation_snapshot()
+    if snapshot.get("filename") == path.name and snapshot.get("state") in {
+        "queued",
+        "generating",
+        "cancelling",
+    }:
+        raise HTTPException(status_code=409, detail="当前任务仍在使用这个文件")
+    deleted = path.is_file()
+    path.unlink(missing_ok=True)
+    if snapshot.get("filename") == path.name:
+        _reset_generation_status()
+    return {"deleted": deleted, "filename": path.name, **_history_summary()}
+
+
+@app.delete("/api/history")
+def clear_history() -> dict[str, Any]:
+    snapshot = _generation_snapshot()
+    protected_name = (
+        snapshot.get("filename")
+        if snapshot.get("state") in {"queued", "generating", "cancelling"}
+        else None
+    )
+    removed = 0
+    for path in _generation_files():
+        if protected_name and path.name == protected_name:
+            continue
+        path.unlink(missing_ok=True)
+        removed += 1
+    if not protected_name:
+        _reset_generation_status()
+    return {"deleted": removed, **_history_summary()}
 
 
 if __name__ == "__main__":

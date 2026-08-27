@@ -4,9 +4,11 @@ from array import array
 import ast
 import asyncio
 from copy import deepcopy
+import hashlib
 from html.parser import HTMLParser
 from io import BytesIO
 import math
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -18,11 +20,13 @@ from unittest.mock import patch
 import wave
 
 from fastapi import HTTPException, UploadFile
+from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 from starlette.datastructures import Headers
 
 import studio_server
 from indextts.infer_v2_5 import IndexTTS2, apply_pronunciation_annotations
+from indextts.utils.model_integrity import inspect_model_directory
 from indextts.utils.presets import safe_preset_name
 
 
@@ -94,6 +98,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     required_ids = {
         "voice-file",
         "reference-start",
+        "reference-quality",
+        "reference-quality-title",
+        "reference-quality-metrics",
+        "reference-quality-issues",
         "record-dialog",
         "preset-confirm-dialog",
         "preset-confirm-title",
@@ -152,6 +160,9 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
         "export-format-menu",
         "refresh-presets",
         "refresh-status",
+        "verify-model",
+        "history-summary",
+        "clear-history",
     }
     assert not {item for item in required_ids if f'id="{item}"' not in ui}
     assert all(
@@ -159,7 +170,9 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
         for language in ("ZH", "EN", "JA", "ES", "AR")
     )
     assert all(f'data-mode="{mode}"' in ui for mode in range(4))
-    assert all(f'data-ui-locale="{locale}"' in ui for locale in ("zh", "en", "ja", "es", "ar"))
+    assert all(
+        f'data-ui-locale="{locale}"' in ui for locale in ("zh", "en", "ja", "es", "ar")
+    )
     assert 'src="/ui/i18n.js"' in ui
     assert ui.index('id="task-status-bar"') < ui.index('id="workspace"')
     assert 'id="generation-chip"' not in ui
@@ -205,7 +218,7 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert ".switch input:focus-visible + span" in ui
     assert "segmentRequestId" in ui and "new AbortController()" in ui
     assert "resourceLoadId" in ui
-    assert "event?.target?.value ?? $(\"search\").value" in ui
+    assert 'event?.target?.value ?? $("search").value' in ui
     assert "setActiveNavigation" in ui
     assert all(
         re.search(rf'id="{element_id}"[^>]*dir="ltr"', ui)
@@ -240,6 +253,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert 'form.append("overwrite", String(overwrite))' in ui
     assert "error.status === 409" in ui
     assert "preset_exists(clean_name) and not overwrite" in server
+    assert "cancelGeneration()" in ui
+    assert "requestDeleteHistory(record)" in ui
+    assert 'maxlength="20000"' in ui
+    assert '"/api/reference-quality"' in ui
     assert 'class="volume-icon-on"' in ui
     assert 'class="volume-icon-muted"' in ui
     assert 'volumeButton.classList.toggle("is-muted", muted)' in ui
@@ -267,9 +284,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
 
     infer_mappings = (
         'lang=normalized["language"]',
-        'emo_audio_prompt=emotion_path if normalized["emotionMode"] == 1 else None',
+        "emo_audio_prompt=emotion_path",
+        'normalized["emotionMode"] == 1',
         'emo_alpha=normalized["emotionWeight"]',
-        'emo_vector=vector',
+        "emo_vector=vector",
         'use_emo_text=normalized["emotionMode"] == 3',
         'emo_text=normalized["emotionText"] or None',
         'use_random=normalized["emotionRandom"]',
@@ -331,6 +349,15 @@ def test_settings_validation_matches_ui_ranges() -> None:
     else:
         raise AssertionError("out-of-range topP must be rejected")
 
+    try:
+        asyncio.run(
+            studio_server.segments({"text": "x" * (studio_server.MAX_TEXT_CHARS + 1)})
+        )
+    except HTTPException as error:
+        assert error.status_code == 400
+    else:
+        raise AssertionError("oversized scripts must be rejected before model loading")
+
 
 def test_reference_window_start_is_passed_to_ffmpeg() -> None:
     upload = UploadFile(
@@ -349,6 +376,125 @@ def test_reference_window_start_is_passed_to_ffmpeg() -> None:
     assert arguments[arguments.index("-t") + 1] == "15"
     assert path is not None
     Path(path).unlink(missing_ok=True)
+
+
+def test_reference_quality_detects_silence_and_clipping() -> None:
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        directory = Path(temporary_directory)
+
+        def write(name: str, samples: array) -> Path:
+            path = directory / name
+            with wave.open(str(path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(22050)
+                output.writeframes(samples.tobytes())
+            return path
+
+        silence = write("silence.wav", array("h", [0] * 22050))
+        assert studio_server._analyze_reference_audio(silence)["fatal"] is True
+
+        clipped = write("clipped.wav", array("h", [32767, -32768] * 22050))
+        clipped_result = studio_server._analyze_reference_audio(clipped)
+        assert clipped_result["quality"] == "poor"
+        assert "heavy-clipping" in clipped_result["issues"]
+
+        clean = write(
+            "clean.wav",
+            array(
+                "h",
+                (
+                    round(7000 * math.sin(2 * math.pi * 220 * index / 22050))
+                    for index in range(22050 * 8)
+                ),
+            ),
+        )
+        assert studio_server._analyze_reference_audio(clean)["quality"] == "good"
+
+
+def test_generation_job_is_single_and_cancelable() -> None:
+    first = studio_server._claim_generation_job("first")
+    assert first is not None
+    try:
+        assert studio_server._claim_generation_job("second") is None
+        assert studio_server._request_generation_cancel() == "first"
+        assert first.is_set()
+        try:
+            studio_server._raise_if_cancelled(first)
+        except studio_server.GenerationCancelled:
+            pass
+        else:
+            raise AssertionError("cancelled task must stop at the next checkpoint")
+    finally:
+        studio_server._release_generation_job("first")
+    assert studio_server._claim_generation_job("third") is not None
+    studio_server._release_generation_job("third")
+
+
+def test_history_retention_and_deletion_are_bounded() -> None:
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        directory = Path(temporary_directory)
+        for index in range(5):
+            path = directory / f"{index}.wav"
+            path.write_bytes(b"x" * 10)
+            path.touch()
+            # Make ordering deterministic.
+            path.chmod(0o600)
+            os.utime(path, (index + 1, index + 1))
+        with (
+            patch("studio_server.GENERATIONS", directory),
+            patch("studio_server.MAX_HISTORY_ITEMS", 3),
+            patch("studio_server.MAX_HISTORY_BYTES", 25),
+        ):
+            removed = studio_server._prune_generation_history()
+            summary = studio_server._history_summary()
+        assert len(removed) == 3
+        assert summary == {"count": 2, "totalBytes": 20, "maxItems": 3, "maxBytes": 25}
+
+
+def test_model_integrity_checks_size_and_hash() -> None:
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        directory = Path(temporary_directory)
+        path = directory / "model.bin"
+        path.write_bytes(b"model-data")
+        metadata = {
+            "model.bin": {
+                "size": path.stat().st_size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        }
+        result = inspect_model_directory(
+            directory,
+            verify_hashes=True,
+            metadata=metadata,
+            required_files=("model.bin",),
+        )
+        assert result["ok"] is True and result["checkedHashes"] == 1
+        path.write_bytes(b"damaged")
+        assert (
+            inspect_model_directory(
+                directory,
+                metadata=metadata,
+                required_files=("model.bin",),
+            )["ok"]
+            is False
+        )
+
+
+def test_local_origin_and_host_are_enforced() -> None:
+    client = TestClient(studio_server.app)
+    assert client.get("/api/health").status_code == 200
+    assert client.get("/api/health", headers={"host": "example.com"}).status_code == 400
+    blocked = client.post(
+        "/api/generation/cancel",
+        headers={"origin": "https://example.com", "sec-fetch-site": "cross-site"},
+    )
+    assert blocked.status_code == 403
+    allowed = client.post(
+        "/api/generation/cancel",
+        headers={"origin": "http://testserver"},
+    )
+    assert allowed.status_code == 200
 
 
 def test_natural_pacing_splits_and_concatenates() -> None:
@@ -370,19 +516,29 @@ def test_natural_pacing_splits_and_concatenates() -> None:
                 destination.setsampwidth(2)
                 destination.setframerate(1000)
                 destination.writeframes(array("h", [100] * 100).tobytes())
-        studio_server._concatenate_wavs_with_pauses(
-            [(first, 250), (second, 0)], output
-        )
+        studio_server._concatenate_wavs_with_pauses([(first, 250), (second, 0)], output)
         with wave.open(str(output), "rb") as source:
             assert source.getnframes() == 450
 
 
 def test_status_and_file_urls_are_scoped() -> None:
     payload = studio_server.status()
-    assert {"model", "modelReady", "modelAvailable", "modelState", "generation"} <= payload.keys()
+    assert {
+        "model",
+        "modelReady",
+        "modelAvailable",
+        "modelState",
+        "generation",
+    } <= payload.keys()
     assert {"stage", "progress", "tokenProgress"} <= payload["generation"].keys()
-    assert studio_server._url_for(studio_server.GENERATIONS / "sample.wav") == "/files/generations/sample.wav"
-    assert studio_server._url_for(studio_server.PRESETS / "voice" / "prompt.wav") == "/files/presets/voice/prompt.wav"
+    assert (
+        studio_server._url_for(studio_server.GENERATIONS / "sample.wav")
+        == "/files/generations/sample.wav"
+    )
+    assert (
+        studio_server._url_for(studio_server.PRESETS / "voice" / "prompt.wav")
+        == "/files/presets/voice/prompt.wav"
+    )
     assert studio_server._url_for(ROOT / "README.md") is None
     formats = studio_server._available_export_formats()
     assert formats and formats[0]["id"] == "wav"
@@ -419,7 +575,9 @@ def test_static_interface_text_has_translation_coverage() -> None:
             self.text: list[str] = []
             self.attributes: list[str] = []
 
-        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        def handle_starttag(
+            self, tag: str, attrs: list[tuple[str, str | None]]
+        ) -> None:
             self.stack.append(tag)
             for name, value in attrs:
                 if (
@@ -526,14 +684,14 @@ def test_feature_inventory_counts_and_routes() -> None:
     }
     cases = [
         line
-        for line in (ROOT / "examples" / "cases.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (ROOT / "examples" / "cases.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     assert len(cases) == 14
     api_paths = {
-        route.path
-        for route in studio_server.app.routes
-        if isinstance(route, APIRoute)
+        route.path for route in studio_server.app.routes if isinstance(route, APIRoute)
     }
     assert {
         "/",
@@ -544,18 +702,31 @@ def test_feature_inventory_counts_and_routes() -> None:
         "/api/export/{filename}",
         "/api/presets",
         "/api/presets/{name}",
+        "/api/reference-quality",
         "/api/segments",
         "/api/generate",
+        "/api/generation/cancel",
+        "/api/model-integrity",
         "/api/examples",
         "/api/history",
+        "/api/history-summary",
+        "/api/history/{filename}",
     } <= api_paths
+
+
+def test_transformer_generation_uses_explicit_mixin_and_dynamic_cache() -> None:
+    for filename in ("model.py", "model_v2.py", "model_v2_5.py"):
+        source = (ROOT / "indextts" / "gpt" / filename).read_text(encoding="utf-8")
+        assert (
+            "class GPT2InferenceModel(GPT2PreTrainedModel, GenerationMixin)" in source
+        )
+        assert "past_key_values = DynamicCache()" in source
+        assert "if isinstance(past, Cache):" in source
 
 
 def test_model_work_uses_daemon_threads() -> None:
     daemon = asyncio.run(
-        studio_server._run_in_daemon_thread(
-            lambda: threading.current_thread().daemon
-        )
+        studio_server._run_in_daemon_thread(lambda: threading.current_thread().daemon)
     )
     assert daemon is True
     assert "asyncio.to_thread" not in (ROOT / "studio_server.py").read_text(

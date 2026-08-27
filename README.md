@@ -38,9 +38,9 @@ Local-first multilingual voice cloning and speech generation workspace.
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/assets/feature-reference-window.jpg" alt="长素材参考片段起点" />
-      <br /><strong>长素材参考片段</strong>
-      <br /><sub>从长音频或视频中选择模型使用的 15 秒声音</sub>
+      <img src="docs/assets/feature-reference-window.jpg" alt="参考片段与质量检查" />
+      <br /><strong>参考片段与质量检查</strong>
+      <br /><sub>选择模型使用的 15 秒声音，并检查音量、静音和削波</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/assets/feature-emotion-vector.jpg" alt="八维情绪控制" />
@@ -95,6 +95,8 @@ IndexTTS Studio 是一个运行在浏览器中的 IndexTTS 2.5 本地可视化�
 - 支持语速、随机生成、候选范围、重复抑制和分段上限等参数。
 - 支持拼音、英文 CMU 音素和日语假名发音标注。
 - 提供自然口播停顿、分句预览、实时 Token 进度、预设和生成历史。
+- 自动检查参考声音的时长、音量、静音和削波；生成任务可取消。
+- 生成历史支持单条删除和清空，并自动保留最近 100 条或最多 5 GB。
 - 可导出 WAV、MP3、M4A、FLAC 和 OGG；实际格式取决于本机 FFmpeg。
 - 为 Apple M 系列 Mac 提供 MPS 推理与 BigVGAN CPU 兼容路径。
 
@@ -114,6 +116,7 @@ uv sync --extra studio --locked
 ```bash
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+uv run python -m indextts.utils.model_integrity checkpoints
 ```
 
 启动 Studio：
@@ -138,7 +141,7 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 - CUDA、DeepSpeed 和 CUDA 内核用于 NVIDIA GPU 加速。
 - Studio 的 Mac 路径面向 M1 及后续 Apple M 系列芯片，包括 Pro、Max 和 Ultra。
-- Windows 和 Linux 可使用 Python 启动命令；录音功能在远程部署时需要 HTTPS。
+- Windows 和 Linux 保留 Python 启动路径，但本轮未做实机验证；录音功能在远程部署时需要 HTTPS。
 
 ## 项目结构
 

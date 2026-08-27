@@ -32,6 +32,9 @@ uv sync --extra studio --locked
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
 
+# 完整校验官方模型文件；首次下载后建议运行一次
+uv run python -m indextts.utils.model_integrity checkpoints
+
 # 启动工作台
 uv run --extra studio --locked python studio_server.py
 ```
@@ -53,5 +56,9 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 - 服务默认只监听本机。远程部署并使用录音功能时需要 HTTPS。
 - 首次录音需允许浏览器访问麦克风；系统声音只有在操作系统将其提供为音频输入设备时才会出现在列表中。
 - 音频文件上限为 100 MB，视频文件上限为 1 GB。导入长音频或视频后，可选择参考片段起点；模型从该位置使用 15 秒声音。自然口播节奏支持分别设置句间和段落停顿。
+- 工作台会检查参考声音的时长、音量、静音和削波；多人说话与具体噪声类型仍需人工试听确认。
+- 单次台词上限为 20,000 个字符；同一服务同时只运行一个生成任务，运行中可从顶部状态栏取消。
+- 生成历史可单条删除或清空，并自动保留最近 100 条或最多 5 GB，达到任一上限时删除最早记录。
+- 服务拒绝来自非本机网页的修改请求。默认仅监听 `127.0.0.1`，不要在没有额外鉴权的情况下改为公网监听。
 - 预设和生成结果默认保存在 `outputs/`。
 - 模型权重需要单独下载；许可信息见 [LICENSE](LICENSE) 和 [OPEN_SOURCE_NOTICE.md](OPEN_SOURCE_NOTICE.md)。

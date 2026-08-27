@@ -38,9 +38,9 @@ Local-first multilingual voice cloning and speech generation workspace.
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/assets/feature-reference-window-en.jpg" alt="Reference window for long media" />
-      <br /><strong>Reference window for long media</strong>
-      <br /><sub>Select the 15-second voice segment used by the model</sub>
+      <img src="docs/assets/feature-reference-window-en.jpg" alt="Reference segment and quality check" />
+      <br /><strong>Reference segment and quality check</strong>
+      <br /><sub>Select the 15-second segment and check level, silence, and clipping</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/assets/feature-emotion-vector-en.jpg" alt="Eight-dimensional emotion control" />
@@ -95,6 +95,8 @@ The project also provides the IndexTTS command line and Gradio WebUI. Model weig
 - Control speed, random sampling, candidate range, repetition penalty, and segment limits.
 - Add Chinese pinyin, English CMU phoneme, and Japanese kana pronunciation annotations.
 - Configure natural speech pauses and view sentence segmentation, live token progress, presets, and generation history.
+- Check reference duration, level, silence, and clipping automatically; active generation can be cancelled.
+- Delete individual or all history items; the latest 100 items or up to 5 GB are retained automatically.
 - Export WAV, MP3, M4A, FLAC, or OGG when supported by the installed FFmpeg build.
 - Use an MPS inference path and BigVGAN CPU compatibility path on Apple M-series Macs.
 
@@ -114,6 +116,7 @@ Download the IndexTTS 2.5 model weights:
 ```bash
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+uv run python -m indextts.utils.model_integrity checkpoints
 ```
 
 Start Studio:
@@ -138,7 +141,7 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 - CUDA, DeepSpeed, and CUDA kernels provide NVIDIA GPU acceleration.
 - The Mac path targets M1 and later Apple M-series chips, including Pro, Max, and Ultra variants.
-- Windows and Linux can use the Python launch command. Browser recording requires HTTPS when the service is deployed remotely.
+- Windows and Linux retain the Python launch path but were not hardware-tested in this Mac-side validation. Browser recording requires HTTPS when deployed remotely.
 
 ## Project structure
 

@@ -38,9 +38,9 @@
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/assets/feature-reference-window-ja.jpg" alt="長時間素材の参照区間" />
-      <br /><strong>長時間素材の参照区間</strong>
-      <br /><sub>長い音声や動画からモデルが使う15秒区間を選択</sub>
+      <img src="docs/assets/feature-reference-window-ja.jpg" alt="参照区間と品質確認" />
+      <br /><strong>参照区間と品質確認</strong>
+      <br /><sub>15秒区間を選択し、音量・無音・クリッピングを確認</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/assets/feature-emotion-vector-ja.jpg" alt="8次元感情制御" />
@@ -95,6 +95,8 @@ IndexTTS のコマンドラインと Gradio WebUI も利用できます。モデ
 - 速度、ランダム生成、候補範囲、繰り返し抑制、分割上限の調整。
 - 中国語ピンイン、英語 CMU 音素、日本語かなによる発音指定。
 - 自然な間、文分割プレビュー、リアルタイム Token、プリセット、生成履歴。
+- 参照音声の長さ・音量・無音・クリッピングを自動確認し、生成タスクをキャンセル可能。
+- 履歴を個別または一括削除でき、最新100件または最大5 GBまで自動保持。
 - FFmpeg が対応している WAV、MP3、M4A、FLAC、OGG の書き出し。
 - Apple M シリーズ Mac 向けの MPS 推論と BigVGAN CPU 互換経路。
 
@@ -114,6 +116,7 @@ IndexTTS 2.5 のモデル重みをダウンロードします。
 ```bash
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+uv run python -m indextts.utils.model_integrity checkpoints
 ```
 
 Studio を起動します。
@@ -138,7 +141,7 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 - NVIDIA GPU では CUDA、DeepSpeed、CUDA カーネルによる高速化を利用します。
 - Mac 向け経路は M1 以降の Apple M シリーズ（Pro、Max、Ultra を含む）に対応します。
-- Windows と Linux では Python の起動コマンドを利用できます。リモート環境でブラウザ録音を使う場合は HTTPS が必要です。
+- Windows と Linux の Python 起動経路は維持していますが、今回の Mac 側検証では実機確認していません。リモート録音には HTTPS が必要です。
 
 ## プロジェクト構成
 

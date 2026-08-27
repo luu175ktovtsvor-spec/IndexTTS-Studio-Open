@@ -38,9 +38,9 @@ Un entorno local para clonación de voz y generación de voz en varios idiomas.
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/assets/feature-reference-window-es.jpg" alt="Fragmento de referencia para archivos largos" />
-      <br /><strong>Fragmento de referencia para archivos largos</strong>
-      <br /><sub>Selecciona los 15 segundos de audio que utilizará el modelo</sub>
+      <img src="docs/assets/feature-reference-window-es.jpg" alt="Fragmento de referencia y control de calidad" />
+      <br /><strong>Fragmento de referencia y control de calidad</strong>
+      <br /><sub>Selecciona 15 segundos y comprueba nivel, silencio y recorte</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/assets/feature-emotion-vector-es.jpg" alt="Control emocional de ocho dimensiones" />
@@ -95,6 +95,8 @@ El proyecto también incluye la línea de comandos de IndexTTS y la WebUI de Gra
 - Control de velocidad, generación aleatoria, rango de candidatos, repetición y límites por segmento.
 - Marcado de pronunciación con pinyin chino, fonemas CMU en inglés y kana japonés.
 - Pausas naturales, vista previa de segmentos, progreso de Token, preajustes e historial.
+- Comprobación automática de duración, nivel, silencio y recorte de la referencia; la generación activa se puede cancelar.
+- Eliminación individual o total del historial; se conservan los últimos 100 elementos o hasta 5 GB.
 - Exportación a WAV, MP3, M4A, FLAC y OGG cuando FFmpeg lo permita.
 - Ruta de inferencia MPS y compatibilidad de BigVGAN por CPU en Mac con chips Apple M.
 
@@ -114,6 +116,7 @@ Descarga los pesos de IndexTTS 2.5:
 ```bash
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+uv run python -m indextts.utils.model_integrity checkpoints
 ```
 
 Inicia Studio:
@@ -138,7 +141,7 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 - CUDA, DeepSpeed y los kernels CUDA aceleran la ejecución en GPU NVIDIA.
 - La ruta para Mac está dirigida a chips Apple M1 y posteriores, incluidas las variantes Pro, Max y Ultra.
-- Windows y Linux pueden usar el comando de Python. La grabación desde el navegador requiere HTTPS cuando el servicio se publica de forma remota.
+- Windows y Linux conservan el inicio mediante Python, pero no se probaron en hardware durante esta validación en Mac. La grabación remota requiere HTTPS.
 
 ## Estructura del proyecto
 

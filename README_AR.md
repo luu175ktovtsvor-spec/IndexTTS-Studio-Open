@@ -38,9 +38,9 @@
 <table>
   <tr>
     <td width="50%" align="center">
-      <img src="docs/assets/feature-reference-window-ar.jpg" alt="اختيار المقطع المرجعي من الملفات الطويلة" />
-      <br /><strong>المقطع المرجعي للملفات الطويلة</strong>
-      <br /><sub>اختر مقطع الصوت الذي سيستخدمه النموذج لمدة 15 ثانية</sub>
+      <img src="docs/assets/feature-reference-window-ar.jpg" alt="المقطع المرجعي وفحص الجودة" />
+      <br /><strong>المقطع المرجعي وفحص الجودة</strong>
+      <br /><sub>اختر مقطعًا مدته 15 ثانية وافحص المستوى والصمت والقص</sub>
     </td>
     <td width="50%" align="center">
       <img src="docs/assets/feature-emotion-vector-ar.jpg" alt="التحكم في ثمانية مشاعر" />
@@ -95,6 +95,8 @@ IndexTTS Studio مساحة عمل محلية تعمل في المتصفح للت
 - ضبط السرعة والتوليد العشوائي ونطاق المرشحين ومنع التكرار وحدود المقاطع.
 - تحديد النطق باستخدام Pinyin الصينية وفونيمات CMU الإنجليزية وKana اليابانية.
 - فواصل طبيعية ومعاينة المقاطع وتقدم Token والإعدادات المحفوظة وسجل الإنشاء.
+- فحص مدة الصوت المرجعي ومستواه والصمت والقص تلقائيًا، مع إمكانية إلغاء مهمة الإنشاء.
+- حذف عنصر واحد أو السجل بالكامل، مع الاحتفاظ تلقائيًا بأحدث 100 عنصر أو حتى 5 GB.
 - التصدير إلى WAV وMP3 وM4A وFLAC وOGG وفق دعم FFmpeg المثبت.
 - مسار استدلال MPS ومسار توافق BigVGAN عبر CPU على أجهزة Mac بشرائح Apple M.
 
@@ -114,6 +116,7 @@ uv sync --extra studio --locked
 ```bash
 uv tool install huggingface-hub
 hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints
+uv run python -m indextts.utils.model_integrity checkpoints
 ```
 
 شغّل Studio:
@@ -138,7 +141,7 @@ INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 
 - توفر CUDA وDeepSpeed وأنوية CUDA تسريعًا على بطاقات NVIDIA GPU.
 - يستهدف مسار Mac شرائح Apple M1 وما بعدها، بما فيها Pro وMax وUltra.
-- يمكن لنظامي Windows وLinux استخدام أمر التشغيل عبر Python. يتطلب التسجيل من المتصفح HTTPS عند تشغيل الخدمة عن بُعد.
+- يحتفظ Windows وLinux بمسار التشغيل عبر Python، لكنهما لم يخضعا لاختبار فعلي ضمن هذا التحقق على Mac. يتطلب التسجيل عن بُعد HTTPS.
 
 ## بنية المشروع
 

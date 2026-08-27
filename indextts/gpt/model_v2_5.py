@@ -6,7 +6,9 @@ import torch.nn.functional as F
 
 import transformers
 from transformers import GPT2Config, LogitsProcessorList
+from transformers.cache_utils import Cache, DynamicCache
 from indextts.gpt.transformers_gpt2 import GPT2PreTrainedModel, GPT2Model
+from indextts.gpt.transformers_generation_utils import GenerationMixin
 
 # from transformers import GPT2Config, GPT2PreTrainedModel, LogitsProcessorList
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
@@ -42,7 +44,7 @@ class ResBlock(nn.Module):
         return F.relu(self.net(x) + x)
 
 
-class GPT2InferenceModel(GPT2PreTrainedModel):
+class GPT2InferenceModel(GPT2PreTrainedModel, GenerationMixin):
     def __init__(self, config, gpt, text_pos_emb, embeddings, norm, linear, kv_cache=False):
         super().__init__(config)
         # Note: the argument named `text_pos_emb` here actually represents the mel position embedding
@@ -91,6 +93,8 @@ class GPT2InferenceModel(GPT2PreTrainedModel):
         token_type_ids = kwargs.get("token_type_ids", None)  # usually None
         if not self.kv_cache:
             past_key_values = None
+        elif past_key_values is None:
+            past_key_values = DynamicCache()
         # only last token for inputs_ids if past is defined in kwargs
         if past_key_values:
             input_ids = input_ids[:, -1].unsqueeze(-1)
@@ -203,6 +207,9 @@ class GPT2InferenceModel(GPT2PreTrainedModel):
         :meth:`~transformers.PreTrainedModel.beam_search` or :meth:`~transformers.PreTrainedModel.beam_sample` is
         called. This is required to match :obj:`past_key_values` with the correct beam_idx at every generation step.
         """
+        if isinstance(past, Cache):
+            past.reorder_cache(beam_idx)
+            return past
         return tuple(
             tuple(
                 past_state.index_select(0, beam_idx.to(past_state.device))
