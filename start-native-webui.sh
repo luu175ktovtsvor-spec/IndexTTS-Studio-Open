@@ -21,13 +21,9 @@ NATIVE_STARTUP_URL="${NATIVE_URL}/gradio_api/startup-events"
 
 # Gradio performs its own localhost HTTP check during launch. Keep that check
 # off any inherited proxy without changing proxy settings for other hosts.
-loopback_no_proxy="${NO_PROXY:-${no_proxy:-}}"
-for loopback_host in 127.0.0.1 localhost; do
-  case ",${loopback_no_proxy}," in
-    *",${loopback_host},"*) ;;
-    *) loopback_no_proxy="${loopback_no_proxy:+${loopback_no_proxy},}${loopback_host}" ;;
-  esac
-done
+source "./tools/native-webui-env.sh"
+loopback_no_proxy=$(merge_no_proxy_rules \
+  "${NO_PROXY:-}" "${no_proxy:-}" 127.0.0.1 localhost)
 export NO_PROXY="$loopback_no_proxy"
 export no_proxy="$loopback_no_proxy"
 

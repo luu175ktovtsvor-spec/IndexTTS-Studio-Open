@@ -744,6 +744,8 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert "clean_gradio_cache" in native
     assert 'NATIVE_STARTUP_URL="${NATIVE_URL}/gradio_api/startup-events"' in native
     assert "native_is_ready" in native
+    assert 'source "./tools/native-webui-env.sh"' in native
+    assert "merge_no_proxy_rules" in native
     assert 'export NO_PROXY="$loopback_no_proxy"' in native
     assert 'export no_proxy="$loopback_no_proxy"' in native
     assert 'tail -n 0 -f "$NATIVE_STDERR_LOG" >&2 &' in native
@@ -760,6 +762,37 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert 'os.path.join("outputs", f"spk_' not in webui
     assert "--extra studio --extra test --locked python -m pytest" in tests
     assert '"httpx==0.28.1"' in project and '"pytest>=7.0"' in project
+
+
+def test_native_launcher_merges_upper_and_lower_no_proxy_rules() -> None:
+    helper = ROOT / "tools" / "native-webui-env.sh"
+    env = {
+        **os.environ,
+        "NO_PROXY": "alpha.example, shared.example",
+        "no_proxy": "beta.example,shared.example",
+    }
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; merge_no_proxy_rules "$NO_PROXY" "$no_proxy" '
+            '127.0.0.1 localhost',
+            "bash",
+            str(helper),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().split(",") == [
+        "alpha.example",
+        "shared.example",
+        "beta.example",
+        "127.0.0.1",
+        "localhost",
+    ]
 
 
 def test_tokenizer_vocab_file_is_closed_after_loading() -> None:
