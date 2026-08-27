@@ -743,10 +743,21 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert "export GRADIO_TEMP_DIR" in native
     assert "clean_gradio_cache" in native
     assert "delete_cache=(300, 900)" in webui
+    assert "tqdm.set_lock(threading.RLock())" in webui
+    assert "signal.signal(signal.SIGTERM, _handle_sigterm)" in webui
+    assert "demo.close(verbose=False)" in webui
     assert 'output_path = str(GRADIO_CACHE_DIR / f"spk_' in webui
     assert 'os.path.join("outputs", f"spk_' not in webui
     assert "--extra studio --extra test --locked python -m pytest" in tests
     assert '"httpx==0.28.1"' in project and '"pytest>=7.0"' in project
+
+
+def test_tokenizer_vocab_file_is_closed_after_loading() -> None:
+    tokenizer = (ROOT / "indextts" / "utils" / "tokenizer.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'with open(vocab_path, encoding="utf-8") as vocab_file:' in tokenizer
+    assert "line.split() for line in open(vocab_path)" not in tokenizer
 
 
 def test_gradio_cache_cleanup_is_scoped_to_the_application() -> None:

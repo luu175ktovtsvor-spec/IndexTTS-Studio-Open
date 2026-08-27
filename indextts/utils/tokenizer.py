@@ -181,10 +181,11 @@ def lang_to_token(lang):
 def get_encoding(name: str = "gpt2", num_languages: int = 99, model_dir: str = "checkpoints"):
     vocab_path = os.path.join(model_dir, f'{name}.tiktoken')
     
-    ranks = {
-        base64.b64decode(token): int(rank)
-        for token, rank in (line.split() for line in open(vocab_path) if line)
-    }
+    with open(vocab_path, encoding="utf-8") as vocab_file:
+        ranks = {
+            base64.b64decode(token): int(rank)
+            for token, rank in (line.split() for line in vocab_file if line)
+        }
     n_vocab = len(ranks)
     special_tokens = {}
 

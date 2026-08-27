@@ -1,6 +1,7 @@
 import html
 import json
 import os
+import signal
 import sys
 import threading
 import time
@@ -11,6 +12,14 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 import pandas as pd
+from tqdm import tqdm
+
+# The native WebUI runs inference in threads, not child processes. tqdm's
+# default macOS lock allocates a multiprocessing semaphore on first use; when
+# the service receives SIGTERM that semaphore can outlive the worker thread.
+# A process-local re-entrant lock still serializes progress output without
+# creating an OS resource that needs multiprocessing cleanup.
+tqdm.set_lock(threading.RLock())
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(current_dir)
@@ -1378,5 +1387,13 @@ with gr.Blocks(
 
 
 if __name__ == "__main__":
-    demo.queue(20)
-    demo.launch(server_name=cmd_args.host, server_port=cmd_args.port)
+    def _handle_sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    previous_sigterm_handler = signal.signal(signal.SIGTERM, _handle_sigterm)
+    try:
+        demo.queue(20)
+        demo.launch(server_name=cmd_args.host, server_port=cmd_args.port)
+    finally:
+        demo.close(verbose=False)
+        signal.signal(signal.SIGTERM, previous_sigterm_handler)
