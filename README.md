@@ -137,6 +137,21 @@ uv run --extra studio --locked python studio_server.py
 INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 ```
 
+这里的 `INDEXTTS_STUDIO_PORT` 只会更换自写 Studio 的端口，不会启动上游 Gradio。默认和公开交付界面均为 Studio（7860）。如需临时使用上游原生 WebUI，可在另一个终端运行：
+
+```bash
+./start-native-webui.sh
+# 等价命令：uv run --extra webui --locked python webui.py --host 127.0.0.1 --port 7861
+```
+
+两套界面可以同时打开，但会使用两个独立模型进程，因此不会默认双开。退出各自的启动终端即可安全停止对应服务。
+
+运行 Studio 回归测试：
+
+```bash
+./tools/test-studio.sh
+```
+
 ## 平台说明
 
 - CUDA、DeepSpeed 和 CUDA 内核用于 NVIDIA GPU 加速。
@@ -150,6 +165,8 @@ studio/                 Studio 前端与多语言资源
 studio_server.py        本地 API、生成状态与文件服务
 studio_engine.py        Apple silicon 兼容层
 start-studio.sh         macOS / Linux 启动脚本
+start-native-webui.sh   可选的上游 Gradio 启动脚本
+tools/test-studio.sh    可复现的 Studio 回归测试
 STUDIO_README_ZH.md     详细使用说明
 OPEN_SOURCE_NOTICE.md   许可与修改说明
 ```

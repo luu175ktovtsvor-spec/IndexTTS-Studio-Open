@@ -137,6 +137,21 @@ To use another port:
 INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 ```
 
+`INDEXTTS_STUDIO_PORT` only changes the custom Studio port; it does not start the upstream Gradio page. Studio on 7860 is the default and public interface. To use the optional upstream WebUI in another terminal:
+
+```bash
+./start-native-webui.sh
+# Equivalent: uv run --extra webui --locked python webui.py --host 127.0.0.1 --port 7861
+```
+
+Both pages can be open together, but they use separate model processes, so dual launch is not the default. Closing either launch terminal safely stops its service.
+
+Run the reproducible Studio regression suite:
+
+```bash
+./tools/test-studio.sh
+```
+
 ## Platform notes
 
 - CUDA, DeepSpeed, and CUDA kernels provide NVIDIA GPU acceleration.
@@ -150,6 +165,8 @@ studio/                 Studio frontend and language resources
 studio_server.py        Local API, generation state, and file serving
 studio_engine.py        Apple silicon compatibility layer
 start-studio.sh         macOS / Linux launch script
+start-native-webui.sh   Optional upstream Gradio launcher
+tools/test-studio.sh    Reproducible Studio regression suite
 STUDIO_README_ZH.md     Detailed guide in Chinese
 OPEN_SOURCE_NOTICE.md   License and modification notice
 ```

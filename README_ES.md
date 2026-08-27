@@ -137,6 +137,21 @@ Para utilizar otro puerto:
 INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 ```
 
+`INDEXTTS_STUDIO_PORT` solo cambia el puerto del Studio personalizado; no inicia la página Gradio original. Studio en 7860 es la interfaz predeterminada y pública. Para usar la WebUI original opcional en otra terminal:
+
+```bash
+./start-native-webui.sh
+# Equivalente: uv run --extra webui --locked python webui.py --host 127.0.0.1 --port 7861
+```
+
+Ambas páginas pueden estar abiertas a la vez, pero usan procesos de modelo separados, por lo que el inicio doble no es predeterminado. Cerrar cada terminal detiene de forma segura su servicio.
+
+Ejecuta las pruebas reproducibles de Studio:
+
+```bash
+./tools/test-studio.sh
+```
+
 ## Compatibilidad
 
 - CUDA, DeepSpeed y los kernels CUDA aceleran la ejecución en GPU NVIDIA.
@@ -150,6 +165,8 @@ studio/                 Interfaz de Studio y recursos de idioma
 studio_server.py        API local, estado de generación y archivos
 studio_engine.py        Capa de compatibilidad con Apple silicon
 start-studio.sh         Inicio en macOS / Linux
+start-native-webui.sh   Inicio opcional de Gradio original
+tools/test-studio.sh    Pruebas reproducibles de Studio
 STUDIO_README_ZH.md     Guía detallada en chino
 OPEN_SOURCE_NOTICE.md   Licencia y modificaciones
 ```

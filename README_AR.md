@@ -137,6 +137,21 @@ uv run --extra studio --locked python studio_server.py
 INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 ```
 
+يغيّر `INDEXTTS_STUDIO_PORT` منفذ Studio المخصص فقط ولا يشغّل صفحة Gradio الأصلية. واجهة Studio على 7860 هي الواجهة الافتراضية والعامة. لاستخدام WebUI الأصلية الاختيارية في نافذة طرفية أخرى:
+
+```bash
+./start-native-webui.sh
+# مكافئ: uv run --extra webui --locked python webui.py --host 127.0.0.1 --port 7861
+```
+
+يمكن فتح الواجهتين معًا، لكنهما تستخدمان عمليتي نموذج منفصلتين، لذلك لا يتم تشغيلهما معًا افتراضيًا. يؤدي إغلاق نافذة التشغيل إلى إيقاف خدمتها بأمان.
+
+لتشغيل اختبارات Studio القابلة للتكرار:
+
+```bash
+./tools/test-studio.sh
+```
+
 ## الأنظمة المدعومة
 
 - توفر CUDA وDeepSpeed وأنوية CUDA تسريعًا على بطاقات NVIDIA GPU.
@@ -150,6 +165,8 @@ studio/                 واجهة Studio وموارد اللغات
 studio_server.py        API محلية وحالة الإنشاء وخدمة الملفات
 studio_engine.py        طبقة توافق Apple silicon
 start-studio.sh         تشغيل macOS / Linux
+start-native-webui.sh   تشغيل اختياري لواجهة Gradio الأصلية
+tools/test-studio.sh    اختبارات Studio قابلة للتكرار
 STUDIO_README_ZH.md     دليل تفصيلي بالصينية
 OPEN_SOURCE_NOTICE.md   الترخيص وتفاصيل التعديلات
 ```

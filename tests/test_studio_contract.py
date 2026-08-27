@@ -728,6 +728,17 @@ def test_transformer_generation_uses_explicit_mixin_and_dynamic_cache() -> None:
         assert "if isinstance(past, Cache):" in source
 
 
+def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None:
+    native = (ROOT / "start-native-webui.sh").read_text(encoding="utf-8")
+    tests = (ROOT / "tools" / "test-studio.sh").read_text(encoding="utf-8")
+    webui = (ROOT / "webui.py").read_text(encoding="utf-8")
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'default="127.0.0.1"' in webui
+    assert "--host 127.0.0.1" in native
+    assert "--extra studio --extra test --locked python -m pytest" in tests
+    assert '"httpx==0.28.1"' in project and '"pytest>=7.0"' in project
+
+
 def test_model_work_uses_daemon_threads() -> None:
     daemon = asyncio.run(
         studio_server._run_in_daemon_thread(lambda: threading.current_thread().daemon)

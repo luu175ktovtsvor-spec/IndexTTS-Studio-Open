@@ -47,6 +47,21 @@ macOS/Linux 也可运行 `./start-studio.sh`。如需更换端口：
 INDEXTTS_STUDIO_PORT=7861 ./start-studio.sh
 ```
 
+默认和公开交付界面是自写 Studio。`INDEXTTS_STUDIO_PORT` 只更换 Studio 端口，不代表第二套界面。上游原生 Gradio WebUI 为可选入口，可在另一个终端运行：
+
+```bash
+./start-native-webui.sh
+# 默认 http://127.0.0.1:7861
+```
+
+Studio 与原生 WebUI 可同时打开，但会使用两个独立模型进程并增加内存占用，因此默认启动器只启动 Studio。关闭对应启动终端即可停止该服务。
+
+回归测试命令：
+
+```bash
+./tools/test-studio.sh
+```
+
 权重位于其他目录时，可设置 `INDEXTTS_CHECKPOINTS_DIR=/path/to/checkpoints`。
 
 第一次打开时会自动下载试音案例，可能需要等待片刻。
