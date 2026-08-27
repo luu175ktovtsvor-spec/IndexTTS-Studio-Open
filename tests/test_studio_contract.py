@@ -257,6 +257,10 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert "requestDeleteHistory(record)" in ui
     assert 'maxlength="20000"' in ui
     assert '"/api/reference-quality"' in ui
+    assert re.search(r'id="model-chip"[^>]*role="button"', ui)
+    assert "state.referenceQuality?.fatal !== true" in ui
+    assert "value >= 1073741824" in ui
+    assert '$("model-chip").addEventListener("keydown"' in ui
     assert 'class="volume-icon-on"' in ui
     assert 'class="volume-icon-muted"' in ui
     assert 'volumeButton.classList.toggle("is-muted", muted)' in ui

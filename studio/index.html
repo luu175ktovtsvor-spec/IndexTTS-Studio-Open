@@ -258,6 +258,13 @@
         width: 190px;
         justify-content: center;
       }
+      .model-chip[role="button"] {
+        cursor: pointer;
+      }
+      .model-chip[role="button"]:focus-visible {
+        border-color: rgba(186, 135, 255, 0.72);
+        outline: 3px solid rgba(151, 103, 255, 0.16);
+      }
       #model-status {
         min-width: 0;
         overflow: hidden;
@@ -2965,7 +2972,13 @@
               </button>
             </div>
           </div>
-          <span class="model-chip loading" id="model-chip"
+          <span
+            class="model-chip loading"
+            id="model-chip"
+            role="button"
+            tabindex="0"
+            aria-label="验证模型文件"
+            aria-busy="false"
             ><i></i
             ><span id="model-status" data-compact="检查中"
               >IndexTTS-2.5 · 检查中</span
@@ -4261,9 +4274,11 @@
       }
       function formatBytes(value) {
         if (!value) return tr("本地文件");
-        return value >= 1048576
-          ? (value / 1048576).toFixed(1) + " MB"
-          : Math.max(1, Math.round(value / 1024)) + " KB";
+        return value >= 1073741824
+          ? (value / 1073741824).toFixed(1) + " GB"
+          : value >= 1048576
+            ? (value / 1048576).toFixed(1) + " MB"
+            : Math.max(1, Math.round(value / 1024)) + " KB";
       }
       function setFlow(id, name, text) {
         const node = $(id);
@@ -4308,7 +4323,10 @@
       function updateActions() {
         const textLength = [...$("text").value.trim()].length;
         const ready = Boolean(
-          state.voiceFile && textLength && textLength <= MAX_TEXT_CHARS,
+          state.voiceFile &&
+          state.referenceQuality?.fatal !== true &&
+          textLength &&
+          textLength <= MAX_TEXT_CHARS,
         );
         const presetName = $("preset-name").value.trim();
         const busy =
@@ -4333,11 +4351,17 @@
       }
       function updateWorkflow() {
         const voice = Boolean(state.voiceFile),
-          text = Boolean($("text").value.trim());
+          text = Boolean($("text").value.trim()),
+          qualityFatal = state.referenceQuality?.fatal === true,
+          voiceUsable = voice && !qualityFatal;
         setFlow(
           "flow-voice",
-          voice ? "done" : "",
-          voice ? "参考声音已准备" : "等待添加",
+          voiceUsable ? "done" : "",
+          qualityFatal
+            ? "参考声音需要重新录制"
+            : voice
+              ? "参考声音已准备"
+              : "等待添加",
         );
         setFlow(
           "flow-script",
@@ -4364,14 +4388,19 @@
           busy ? "working" : state.generationState === "complete" ? "done" : "",
           copy,
         );
-        uiText("voice-summary", voice ? "已准备" : "未添加");
+        uiText(
+          "voice-summary",
+          qualityFatal ? "需处理" : voice ? "已准备" : "未添加",
+        );
         uiText(
           "script-hint",
-          voice && text
-            ? "参数可在右侧继续细调，或直接生成。"
-            : voice
-              ? "现在输入台词和语言即可生成。"
-              : "先添加参考声音，再输入台词。",
+          qualityFatal
+            ? "参考声音不可用，请重新录制或选择片段。"
+            : voice && text
+              ? "参数可在右侧继续细调，或直接生成。"
+              : voice
+                ? "现在输入台词和语言即可生成。"
+                : "先添加参考声音，再输入台词。",
         );
         if (state.generationState === "idle") {
           const statusBar = $("task-status-bar");
@@ -4393,11 +4422,13 @@
                   ? state.modelState === "invalid"
                     ? "模型文件异常"
                     : "模型未安装"
-                  : !voice
-                    ? "等待参考声音"
-                    : !text
-                      ? "等待台词"
-                      : "可以生成",
+                  : qualityFatal
+                    ? "参考声音不可用"
+                    : !voice
+                      ? "等待参考声音"
+                      : !text
+                        ? "等待台词"
+                        : "可以生成",
             detail =
               state.serviceAvailable === false
                 ? "本地服务不可用，请重新运行启动命令。"
@@ -4405,17 +4436,21 @@
                   ? state.modelState === "invalid"
                     ? "模型文件不完整或已损坏，请重新下载或执行完整校验。"
                     : "请先按安装说明下载 IndexTTS-2.5 模型权重。"
-                  : !voice
-                    ? "先添加参考声音，再输入台词。"
-                    : !text
-                      ? "现在输入台词和语言即可生成。"
-                      : "参数可在右侧继续细调，或直接生成。";
+                  : qualityFatal
+                    ? "参考声音中没有足够的清晰人声，请重新录制或选择片段。"
+                    : !voice
+                      ? "先添加参考声音，再输入台词。"
+                      : !text
+                        ? "现在输入台词和语言即可生成。"
+                        : "参数可在右侧继续细调，或直接生成。";
           statusBar.classList.add(
             state.serviceAvailable === false || state.modelAvailable === false
               ? "error"
-              : voice && text
-                ? "ready"
-                : "waiting",
+              : qualityFatal
+                ? "error"
+                : voiceUsable && text
+                  ? "ready"
+                  : "waiting",
           );
           state.generationTitle = title;
           state.generationDetail = detail;
@@ -4431,7 +4466,9 @@
                 ? state.modelState === "invalid"
                   ? "模型文件异常，请重新下载或执行完整校验。"
                   : "请先按安装说明下载 IndexTTS-2.5 模型权重。"
-                : "生成时保持页面打开；完成后可直接试听或导出。",
+                : qualityFatal
+                  ? "参考声音不可用，请重新录制或选择片段。"
+                  : "生成时保持页面打开；完成后可直接试听或导出。",
           );
         }
         updateActions();
@@ -4594,6 +4631,7 @@
       }
       function setVoice(file) {
         state.voiceFile = file || null;
+        state.referenceQuality = null;
         const source = $("source-audio");
         if (state.sourceUrl) URL.revokeObjectURL(state.sourceUrl);
         state.sourceUrl = null;
@@ -4681,6 +4719,8 @@
           item.textContent = trRuntime(message);
           issues.append(item);
         });
+        updateWorkflow();
+        updateActions();
       }
       function scheduleReferenceQuality() {
         clearTimeout(state.referenceQualityTimer);
@@ -5362,6 +5402,10 @@
         if (state.verifyingModel) return;
         state.verifyingModel = true;
         uiText("verify-model", "正在验证模型…");
+        $("model-chip").setAttribute("aria-busy", "true");
+        $("model-chip").classList.add("loading");
+        uiText("model-status", "正在验证模型…");
+        $("model-status").dataset.compact = tr("验证中");
         updateActions();
         try {
           const result = await jsonRequest(
@@ -5385,12 +5429,13 @@
               true,
             );
           }
-          await syncStatus(false);
         } catch (error) {
           toast(error.message || "模型文件验证失败", true);
         } finally {
           state.verifyingModel = false;
+          $("model-chip").setAttribute("aria-busy", "false");
           uiText("verify-model", "验证模型文件");
+          await syncStatus(false);
           updateActions();
         }
       }
@@ -6156,7 +6201,9 @@
           state.modelState = modelState;
           $("model-chip").classList.toggle(
             "loading",
-            modelState === "idle" || modelState === "loading",
+            state.verifyingModel ||
+              modelState === "idle" ||
+              modelState === "loading",
           );
           $("model-chip").classList.toggle(
             "missing",
@@ -6187,11 +6234,17 @@
                     : modelState === "error"
                       ? "失败"
                       : "待启动";
-          $("model-status").textContent =
-            (payload.model || "IndexTTS-2.5") + " · " + tr(modelSuffix);
-          $("model-status").dataset.compact = tr(compactSuffix);
-          $("model-chip").title =
-            modelState === "missing"
+          if (state.verifyingModel) {
+            uiText("model-status", "正在验证模型…");
+            $("model-status").dataset.compact = tr("验证中");
+          } else {
+            $("model-status").textContent =
+              (payload.model || "IndexTTS-2.5") + " · " + tr(modelSuffix);
+            $("model-status").dataset.compact = tr(compactSuffix);
+          }
+          $("model-chip").title = state.verifyingModel
+            ? tr("正在验证模型…")
+            : modelState === "missing"
               ? tr("缺少 {count} 个关键模型文件，请先按安装说明下载权重。", {
                   count: (payload.missingModelFiles || []).length,
                 })
@@ -6199,7 +6252,7 @@
                 ? tr("有 {count} 个模型文件异常，请重新下载或执行完整校验。", {
                     count: (payload.invalidModelFiles || []).length,
                   })
-                : "";
+                : tr("点击验证模型文件");
           updateWorkflow();
           if (
             generation.state === "queued" ||
@@ -6869,6 +6922,13 @@
         });
         $("clear-history").addEventListener("click", requestClearHistory);
         $("verify-model").addEventListener("click", verifyModelFiles);
+        $("model-chip").addEventListener("click", verifyModelFiles);
+        $("model-chip").addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            void verifyModelFiles();
+          }
+        });
         $("restore-advanced").addEventListener(
           "click",
           restoreAdvancedDefaults,
