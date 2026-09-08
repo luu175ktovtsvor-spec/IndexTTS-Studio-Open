@@ -102,6 +102,34 @@ IndexTTS Studio 是一个运行在浏览器中的 IndexTTS 2.5 本地可视化�
 
 ## 快速开始
 
+### Docker 一键部署
+
+已安装 Docker Desktop 或 Docker Engine + Compose 时，直接运行：
+
+```bash
+git clone https://github.com/luu175ktovtsvor-spec/IndexTTS-Studio-Open.git
+cd IndexTTS-Studio-Open
+docker compose up -d --build
+```
+
+首次启动会自动下载并校验约 10 GB 的 IndexTTS 2.5 权重，进度可通过
+`docker compose logs -f studio` 查看。容器健康后打开
+[http://127.0.0.1:7860](http://127.0.0.1:7860)。权重、预设与生成记录保存在 Docker
+卷中，重建容器不会丢失；停止服务使用 `docker compose down`。完整模型加载建议给
+Docker 分配至少 16 GB 内存；8 GB 会在模型加载阶段触发 OOM。
+
+Linux + NVIDIA GPU 需先安装 NVIDIA Container Toolkit，然后使用：
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+```
+
+默认只映射到 `127.0.0.1`，不会直接暴露到局域网或公网。可用
+`INDEXTTS_STUDIO_PORT=7861 docker compose up -d` 更换宿主机端口。Apple Silicon
+上的 Docker 容器只能使用 CPU，无法使用 macOS MPS；需要更快生成时仍建议使用下方原生安装。
+
+### 原生安装
+
 需要 Python 3.10 或 3.11、[uv](https://docs.astral.sh/uv/) 和 FFmpeg。
 
 ```bash

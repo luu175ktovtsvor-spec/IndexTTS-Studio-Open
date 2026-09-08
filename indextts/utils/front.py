@@ -119,7 +119,10 @@ class TextNormalizer:
         import platform
         if self.zh_normalizer is not None and self.en_normalizer is not None:
             return
-        if platform.system() != "Linux":  # Mac and Windows
+        if platform.system() != "Linux" or platform.machine().lower() in {
+            "aarch64",
+            "arm64",
+        }:
             from wetext import Normalizer
 
             self.zh_normalizer = Normalizer(remove_erhua=False, lang="zh", operator="tn")

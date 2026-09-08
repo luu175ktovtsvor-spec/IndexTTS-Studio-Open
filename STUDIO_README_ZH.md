@@ -20,6 +20,29 @@ IndexTTS Studio 是基于 IndexTTS 2.5 的本地可视化工作台。参考音�
 
 ## 安装与启动
 
+### Docker 一键部署
+
+```bash
+docker compose up -d --build
+docker compose logs -f studio
+```
+
+首次启动会自动下载并校验约 10 GB 模型权重；服务健康后访问
+`http://127.0.0.1:7860`。权重和 `outputs/` 数据保存在 Docker 卷中。停止服务使用
+`docker compose down`，不会删除持久化数据。完整模型加载建议给 Docker 分配至少
+16 GB 内存；8 GB 会在模型加载阶段触发 OOM。
+
+Linux + NVIDIA GPU 使用：
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+```
+
+默认只监听宿主机 `127.0.0.1`。Apple Silicon 的 Docker 不支持 MPS，容器会使用
+CPU；Mac 上追求速度请使用原生安装。
+
+### 原生安装
+
 前提：Python 3.10 或 3.11、[uv](https://docs.astral.sh/uv/)、以及 `ffmpeg`。macOS 可用 `brew install ffmpeg`；Windows/Linux 请使用对应系统的安装方式。
 
 ```bash

@@ -9,4 +9,5 @@ uv run --extra studio --extra test --locked python -m pytest \
   -p no:cacheprovider \
   -q \
   tests/test_studio_contract.py \
-  tests/test_webui_syntax.py
+  tests/test_webui_syntax.py \
+  tests/test_docker_contract.py
