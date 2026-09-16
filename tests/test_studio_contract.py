@@ -5,6 +5,7 @@ import ast
 import asyncio
 from copy import deepcopy
 import hashlib
+import json
 from html.parser import HTMLParser
 from io import BytesIO
 import math
@@ -106,6 +107,11 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
         "reference-quality-title",
         "reference-quality-metrics",
         "reference-quality-issues",
+        "transcribe-reference",
+        "reference-transcript",
+        "reference-transcript-title",
+        "reference-transcript-meta",
+        "reference-transcript-text",
         "record-dialog",
         "preset-confirm-dialog",
         "preset-confirm-title",
@@ -256,11 +262,16 @@ def test_custom_ui_covers_upstream_webui_controls() -> None:
     assert "requestOverwritePreset(name)" in ui
     assert 'form.append("overwrite", String(overwrite))' in ui
     assert "error.status === 409" in ui
+    assert 'id="voice-identity" hidden' in ui
+    assert '$("voice-identity").hidden = !file' in ui
+    assert "holder.hidden = true" in ui
+    assert "holder.hidden = false" in ui
     assert "preset_exists(clean_name) and not overwrite" in server
     assert "cancelGeneration()" in ui
     assert "requestDeleteHistory(record)" in ui
     assert 'maxlength="20000"' in ui
     assert '"/api/reference-quality"' in ui
+    assert '"/api/reference-transcript"' in ui
     assert re.search(r'id="model-chip"[^>]*role="button"', ui)
     assert "state.referenceQuality?.fatal !== true" in ui
     assert "value >= 1073741824" in ui
@@ -418,6 +429,43 @@ def test_reference_quality_detects_silence_and_clipping() -> None:
             ),
         )
         assert studio_server._analyze_reference_audio(clean)["quality"] == "good"
+
+
+def test_reference_transcript_parses_the_local_asr_result() -> None:
+    def fake_run(command: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
+        output_base = Path(command[command.index("-of") + 1])
+        output_base.with_suffix(".json").write_text(
+            json.dumps(
+                {
+                    "result": {"language": "zh"},
+                    "transcription": [
+                        {
+                            "text": " 第一段 ",
+                            "offsets": {"from": 0, "to": 1200},
+                        },
+                        {
+                            "text": "第二段",
+                            "offsets": {"from": 1200, "to": 2400},
+                        },
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    with (
+        patch("studio_server.shutil.which", return_value="/usr/local/bin/whisper-best"),
+        patch("studio_server.subprocess.run", side_effect=fake_run),
+    ):
+        result = studio_server._transcribe_reference_audio("reference.wav")
+    assert result["language"] == "zh"
+    assert result["text"] == "第一段\n第二段"
+    assert result["segments"] == [
+        {"start": 0.0, "end": 1.2, "text": "第一段"},
+        {"start": 1.2, "end": 2.4, "text": "第二段"},
+    ]
 
 
 def test_generation_job_is_single_and_cancelable() -> None:
@@ -711,6 +759,7 @@ def test_feature_inventory_counts_and_routes() -> None:
         "/api/presets",
         "/api/presets/{name}",
         "/api/reference-quality",
+        "/api/reference-transcript",
         "/api/segments",
         "/api/generate",
         "/api/generation/cancel",
@@ -736,6 +785,7 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     native = (ROOT / "start-native-webui.sh").read_text(encoding="utf-8")
     tests = (ROOT / "tools" / "test-studio.sh").read_text(encoding="utf-8")
     webui = (ROOT / "webui.py").read_text(encoding="utf-8")
+    studio_server_source = (ROOT / "studio_server.py").read_text(encoding="utf-8")
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'default="127.0.0.1"' in webui
     assert "--host 127.0.0.1" in native
@@ -755,6 +805,7 @@ def test_optional_native_launcher_and_test_entrypoint_are_reproducible() -> None
     assert "native-webui-last-error.log" in native
     assert "delete_cache=(300, 900)" in webui
     assert "tqdm.set_lock(threading.RLock())" in webui
+    assert "tqdm.set_lock(threading.RLock())" in studio_server_source
     assert "signal.signal(signal.SIGTERM, _handle_sigterm)" in webui
     assert "demo.close(verbose=False)" in webui
     assert "from studio_engine import MacIndexTTS2 as IndexTTS2" in webui

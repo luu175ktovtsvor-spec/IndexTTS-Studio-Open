@@ -24,32 +24,34 @@ def _mock_optional_dependency_imports():
 
 REQUIRED_MODEL_FILES = [
     "config.yaml",
-    "bpe.model",
     "gpt.pth",
     "s2mel.pth",
+    "codec.pth",
     "wav2vec2bert_stats.pt",
     "feat1.pt",
     "feat2.pt",
+    "multilingual_zh_ja_yue_char_del.tiktoken",
+    "qwen0.6bemo4-merge/model.safetensors",
 ]
-REQUIRED_MODEL_DIRS = [
-    "qwen0.6bemo4-merge",
-]
+REQUIRED_MODEL_DIRS = []
 AUX_MODEL_FILES = [
     "hf_cache/semantic_codec_model.safetensors",
+    "hf_cache/semantic_codec/model.safetensors",
     "hf_cache/campplus_cn_common.bin",
     "hf_cache/bigvgan/config.json",
     "hf_cache/bigvgan/bigvgan_generator.pt",
+    "hf_cache/w2v-bert-2.0/model.safetensors",
 ]
-AUX_MODEL_DIRS = [
-    "hf_cache/w2v-bert-2.0",
-]
+AUX_MODEL_DIRS = []
 
 
 def make_model_dir(base_dir):
     model_dir = base_dir / "checkpoints"
     model_dir.mkdir()
     for filename in REQUIRED_MODEL_FILES:
-        (model_dir / filename).write_text("placeholder", encoding="utf-8")
+        target = model_dir / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("placeholder", encoding="utf-8")
     for dirname in REQUIRED_MODEL_DIRS:
         (model_dir / dirname).mkdir()
     for filename in AUX_MODEL_FILES:
@@ -66,8 +68,8 @@ def make_model_dir(base_dir):
 def assert_model_resource_help(test_case, stderr, model_dir):
     test_case.assertIn(f"Model directory: {model_dir}", stderr)
     test_case.assertIn("Missing resources:", stderr)
-    test_case.assertIn("huggingface-cli download IndexTeam/IndexTTS-2", stderr)
-    test_case.assertIn("modelscope download --model IndexTeam/IndexTTS-2", stderr)
+    test_case.assertIn("huggingface-cli download IndexTeam/IndexTTS-2.5", stderr)
+    test_case.assertIn("modelscope download --model IndexTeam/IndexTTS-2.5", stderr)
     test_case.assertIn(f"indextts2 config set model_dir {model_dir}", stderr)
 
 
@@ -1589,12 +1591,13 @@ class BatchCommandExecutionTests(unittest.TestCase):
             {
                 "cfg_path": str(model_dir / "config.yaml"),
                 "model_dir": str(model_dir),
-                "use_fp16": True,
+                "use_bf16": True,
                 "device": "cuda:0",
                 "use_cuda_kernel": True,
                 "use_deepspeed": True,
                 "use_accel": True,
                 "use_torch_compile": True,
+                "use_qwen_emo": True,
             },
         )
         self.assertTrue(calls[1][1]["verbose"])
@@ -2128,7 +2131,7 @@ class BatchCommandExecutionTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(stdout, "")
         self.assertIn("ERROR: missing required model files", stderr)
-        self.assertIn("bpe.model", stderr)
+        self.assertIn("codec.pth", stderr)
         assert_model_resource_help(self, stderr, model_dir)
 
     def test_batch_returns_runtime_error_when_indextts2_import_fails(self):

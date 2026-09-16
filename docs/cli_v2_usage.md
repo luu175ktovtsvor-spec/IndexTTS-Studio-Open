@@ -1,6 +1,8 @@
-# IndexTTS2 CLI v2 使用文档
+# IndexTTS-2.5 CLI v2 使用文档
 
-本文档面向用户级 `indextts2` 命令行入口。CLI v2 是 IndexTTS2-first 的专用入口, 可安装到用户环境后从任意目录运行, 不依赖仓库根目录作为当前工作目录。它不会替换已有 `indextts` 命令。`indextts` 仍保留现有 IndexTTS1 行为。
+本文档面向用户级 `indextts2` 命令行入口。此 CLI 只支持 IndexTTS-2.5，模型目录、下载源和推理运行时都不会再路由到 IndexTTS-2.0。
+
+CLI v2 是 IndexTTS-2.5-first 的专用入口, 可安装到用户环境后从任意目录运行, 不依赖仓库根目录作为当前工作目录。它不会替换已有 `indextts` 命令。`indextts` 仍保留现有 IndexTTS1 行为。
 
 ## 功能范围
 
@@ -8,9 +10,9 @@
 
 - `indextts2 init`: 创建持久化配置和默认模型资源目录, 不下载模型资源。
 - `indextts2 config`: 查看或修改持久化配置。
-- `indextts2 download`: 显式下载 IndexTTS2 模型资源。
+- `indextts2 download`: 显式下载 IndexTTS-2.5 模型资源。
 - `indextts2 check`: 检查本地模型资源, Python 包和设备可用性。
-- `indextts2 synth`: 使用 IndexTTS2 合成单条文本音频。
+- `indextts2 synth`: 使用 IndexTTS-2.5 合成单条文本音频。
 - `indextts2 batch`: 读取 JSON Lines 批量清单, 串行合成多条独立音频, 或合成后拼接为一个 WAV 文件。
 - `indextts2 concat`: 读取 JSON Lines 拼接清单, 将已有 WAV 片段拼接为一个 WAV 文件。
 
@@ -20,7 +22,7 @@
 - `batch` 的 `--continue-on-error`。
 - `batch` 的并发执行。
 - GPT 采样细节参数, 例如 `top_p`, `top_k`, `temperature` 等。
-- IndexTTS1/IndexTTS2 引擎选择器。
+- IndexTTS1 引擎选择器。
 
 ## 安装与入口
 
@@ -76,25 +78,25 @@ python -m indextts.cli_v2 --help
 indextts2 init
 ```
 
-指定模型资源目录并写入持久化配置（请将 `D:/models/IndexTTS-2` 替换为你的目标模型目录）:
+指定模型资源目录并写入持久化配置（请将 `D:/models/IndexTTS-2.5` 替换为你的目标模型目录）:
 
 ```bash
-indextts2 init --model-dir D:/models/IndexTTS-2
+indextts2 init --model-dir D:/models/IndexTTS-2.5
 ```
 
 `check`, `synth` 和 `batch` 在运行前也会执行首次初始化, 因此首次运行这些命令会创建配置文件和默认模型资源目录, 但仍不会自动下载模型资源。`concat` 不需要模型资源, 不执行模型资源检查。
 
 ## 模型资源目录
 
-CLI v2 使用“模型资源目录”保存 IndexTTS2 的模型文件和配套资源。
+CLI v2 使用“模型资源目录”保存 IndexTTS-2.5 的模型文件和配套资源。
 
 平台默认模型资源目录:
 
 | 平台 | 默认模型资源目录 |
 | --- | --- |
-| Windows | `%LOCALAPPDATA%\IndexTTS\models\IndexTTS-2` |
-| macOS | `~/Library/Application Support/IndexTTS/models/IndexTTS-2` |
-| Linux | `${XDG_DATA_HOME:-~/.local/share}/indextts/models/IndexTTS-2` |
+| Windows | `%LOCALAPPDATA%\IndexTTS\models\IndexTTS-2.5` |
+| macOS | `~/Library/Application Support/IndexTTS/models/IndexTTS-2.5` |
+| Linux | `${XDG_DATA_HOME:-~/.local/share}/indextts/models/IndexTTS-2.5` |
 
 持久化配置位置:
 
@@ -121,15 +123,16 @@ CLI 内部固定使用:
 
 ```text
 config.yaml
-bpe.model
 gpt.pth
 s2mel.pth
+codec.pth
 wav2vec2bert_stats.pt
 feat1.pt
 feat2.pt
-qwen0.6bemo4-merge
+multilingual_zh_ja_yue_char_del.tiktoken
+qwen0.6bemo4-merge/model.safetensors
 hf_cache/w2v-bert-2.0
-hf_cache/semantic_codec_model.safetensors
+hf_cache/semantic_codec/model.safetensors
 hf_cache/campplus_cn_common.bin
 hf_cache/bigvgan/config.json
 hf_cache/bigvgan/bigvgan_generator.pt
@@ -152,7 +155,7 @@ indextts2 config get
 写入模型资源目录:
 
 ```bash
-indextts2 config set model_dir D:/models/IndexTTS-2
+indextts2 config set model_dir D:/models/IndexTTS-2.5
 ```
 
 可配置键:
@@ -161,7 +164,7 @@ indextts2 config set model_dir D:/models/IndexTTS-2
 | --- | --- |
 | `model_dir` | 持久化模型资源目录。 |
 | `default_device` | 持久化默认运行设备, 例如 `cpu`, `cuda`, `cuda:0`, `mps`, `xpu`。 |
-| `use_fp16` | 持久化是否启用 FP16, 值为 `true` 或 `false`。 |
+| `use_fp16` | 持久化是否启用半精度；IndexTTS-2.5 在支持的 CUDA 上映射为 BF16，Mac MPS 保持兼容精度。值为 `true` 或 `false`。 |
 | `use_deepspeed` | 持久化是否启用 DeepSpeed, 值为 `true` 或 `false`。 |
 | `use_cuda_kernel` | 持久化是否启用 CUDA kernel, 值为 `true` 或 `false`。 |
 
@@ -185,13 +188,13 @@ indextts2 download --source modelscope
 指定下载目标目录:
 
 ```bash
-indextts2 download --source huggingface --model-dir D:/models/IndexTTS-2
+indextts2 download --source huggingface --model-dir D:/models/IndexTTS-2.5
 ```
 
 `download --model-dir PATH` 下载成功并通过资源检查后, 默认会把 `PATH` 写入持久化配置的 `model_dir`, 后续 `check`, `synth` 和 `batch` 会默认使用该目录。临时下载或预热其他目录时使用 `--no-save`:
 
 ```bash
-indextts2 download --source modelscope --model-dir D:/tmp/IndexTTS-2 --no-save
+indextts2 download --source modelscope --model-dir D:/tmp/IndexTTS-2.5 --no-save
 ```
 
 下载命令通过 Python API 下载资源, 不依赖外部 `hf` 或 `modelscope` 可执行文件在 `PATH` 中。目标目录已有文件时, CLI 不会清空目录, 下载器可以增量补齐。下载完成后, CLI 会复用模型资源检查判断目录是否可用。
@@ -236,7 +239,7 @@ cpu: available
 最小命令:
 
 ```bash
-indextts2 synth --text "你好, IndexTTS2。" --voice examples/voice_01.wav --output outputs/hello.wav
+indextts2 synth --text "你好, IndexTTS-2.5。" --lang ZH --voice examples/voice_01.wav --output outputs/hello.wav
 ```
 
 从 UTF-8 文本文件读取:
@@ -258,6 +261,8 @@ echo "从标准输入读取文本。" | indextts2 synth --stdin --voice examples
 - `--stdin`
 
 CLI 会去除文本首尾空白, 去除后不能为空。`--text-file` 按 UTF-8 读取。
+
+`--lang` 指定 IndexTTS-2.5 的合成语言，支持 `ZH`、`EN`、`JA`、`ES` 和 `AR`，默认值为 `ZH`。
 
 ## 输出文件
 
@@ -321,7 +326,7 @@ indextts2 synth --text "使用情感向量。" --voice examples/voice_01.wav --e
 - `--emotion-vector` 的总和必须小于等于 `0.8`。
 - CLI 不会自动归一化, 裁剪, 重平衡或改写情感向量。
 - `--emotion-weight` 必须是浮点数, 默认值为 `1.0`。
-- `--emotion-weight` 会传给 IndexTTS2 的 `emo_alpha`。用于 `--emotion-vector` 时, 它会整体缩放 8 维情感向量的强度。
+- `--emotion-weight` 会传给 IndexTTS-2.5 的 `emo_alpha`。用于 `--emotion-vector` 时, 它会整体缩放 8 维情感向量的强度。
 
 ## 批量合成
 
@@ -636,10 +641,10 @@ indextts2 batch --batch-file examples/batch/batch-concat.jsonl --voice examples/
 | --- | --- |
 | `--model-dir PATH` | 本次运行使用的模型资源目录, 覆盖 `INDEXTTS2_MODEL_DIR`, 持久化配置和平台默认值。 |
 | `--device DEVICE` | 本次运行设备, 例如 `cpu`, `cuda`, `cuda:0`, `mps`, `xpu`; 未传时可使用持久化配置 `default_device`。 |
-| `--fp16` / `--no-fp16` | 本次运行是否启用 FP16 半精度推理; 未传时可使用持久化配置 `use_fp16`。 |
+| `--fp16` / `--no-fp16` | 本次运行是否启用半精度；IndexTTS-2.5 在支持的 CUDA 上映射为 BF16，Mac MPS 保持兼容精度; 未传时可使用持久化配置 `use_fp16`。 |
 | `--deepspeed` / `--no-deepspeed` | 本次运行是否启用 DeepSpeed; 未传时可使用持久化配置 `use_deepspeed`。 |
 | `--cuda-kernel` / `--no-cuda-kernel` | 本次运行是否启用 CUDA kernel 路径; 未传时可使用持久化配置 `use_cuda_kernel`。 |
-| `--verbose` | 显示模型运行输出, 并向 `IndexTTS2.infer` 传入 `verbose=True`。 |
+| `--verbose` | 显示模型运行输出, 并向 IndexTTS-2.5 推理运行时传入 `verbose=True`。 |
 
 默认情况下, CLI 会隐藏模型初始化和推理过程中的普通标准输出。`synth` 成功后打印 `Generated: <path>`; `batch` 每条成功任务打印 `Generated: <path>`, 全部成功后再打印 `Batch complete: <n> tasks generated`。需要调试时使用 `--verbose`。
 
@@ -673,7 +678,7 @@ indextts2 batch --batch-file examples/batch/batch-concat.jsonl --voice examples/
 
 | 参数 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次检查使用的 IndexTTS2 模型资源目录。 |
+| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次检查使用的 IndexTTS-2.5 模型资源目录。 |
 | `--device DEVICE` | 否 | 无 | 要求可用的运行设备, 例如 `cuda:0`。 |
 
 ### `indextts2 synth`
@@ -690,9 +695,9 @@ indextts2 batch --batch-file examples/batch/batch-concat.jsonl --voice examples/
 | `--emotion-weight FLOAT` | 否 | `1.0` | 情感权重, 映射到 `emo_alpha`, 可缩放情感向量强度。 |
 | `--output PATH` | 是 | 无 | 输出音频路径。 |
 | `--force` | 否 | `False` | 允许覆盖已有输出文件。 |
-| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次合成使用的 IndexTTS2 模型资源目录。 |
+| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次合成使用的 IndexTTS-2.5 模型资源目录。 |
 | `--device DEVICE` | 否 | 持久化配置或无 | 运行设备。 |
-| `--fp16` / `--no-fp16` | 否 | 持久化配置或 `False` | 启用或禁用 FP16 推理。 |
+| `--fp16` / `--no-fp16` | 否 | 持久化配置或 `False` | 启用或禁用半精度推理。 |
 | `--deepspeed` / `--no-deepspeed` | 否 | 持久化配置或 `False` | 启用或禁用 DeepSpeed。 |
 | `--cuda-kernel` / `--no-cuda-kernel` | 否 | 持久化配置或 `False` | 启用或禁用 CUDA kernel。 |
 | `--verbose` | 否 | `False` | 显示详细运行输出。 |
@@ -714,9 +719,9 @@ indextts2 batch --batch-file examples/batch/batch-concat.jsonl --voice examples/
 | `--emotion-vector VECTOR` | 否 | 无 | 默认 8 维情感向量, 支持逗号分隔或带方括号的列表格式, 与其他情感来源互斥。 |
 | `--emotion-weight FLOAT` | 否 | `1.0` | 默认情感权重, 可被逐行 `emotion_weight` 覆盖。 |
 | `--force` | 否 | `False` | 允许覆盖批量运行开始前已经存在的输出文件。 |
-| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次批量合成使用的 IndexTTS2 模型资源目录。 |
+| `--model-dir PATH` | 否 | 解析后的模型资源目录 | 本次批量合成使用的 IndexTTS-2.5 模型资源目录。 |
 | `--device DEVICE` | 否 | 持久化配置或无 | 运行设备。 |
-| `--fp16` / `--no-fp16` | 否 | 持久化配置或 `False` | 启用或禁用 FP16 推理。 |
+| `--fp16` / `--no-fp16` | 否 | 持久化配置或 `False` | 启用或禁用半精度推理。 |
 | `--deepspeed` / `--no-deepspeed` | 否 | 持久化配置或 `False` | 启用或禁用 DeepSpeed。 |
 | `--cuda-kernel` / `--no-cuda-kernel` | 否 | 持久化配置或 `False` | 启用或禁用 CUDA kernel。 |
 | `--verbose` | 否 | `False` | 显示详细运行输出。 |
@@ -737,7 +742,7 @@ indextts2 batch --batch-file examples/batch/batch-concat.jsonl --voice examples/
 | `0` | 成功 | 初始化完成, 配置更新, 下载检查通过, 环境检查通过或合成成功。 |
 | `1` | 输入错误 | 文本来源不唯一, 文本为空, 缺少 `--output`, 输出已存在但未传 `--force`, 情感参数冲突, 批量清单字段错误, 拼接清单字段错误, WAV 格式不匹配。 |
 | `2` | 本地资源缺失 | 模型资源目录不存在, 必需模型资源缺失, 文本文件不存在, 音色参考音频不存在, 情感参考音频不存在, 批量清单不存在, 拼接清单不存在, 拼接音频不存在。 |
-| `3` | 运行环境不可用 | 必需 Python 包缺失, 下载源 Python 包缺失, 指定设备不可用, IndexTTS2 runtime 导入失败。 |
+| `3` | 运行环境不可用 | 必需 Python 包缺失, 下载源 Python 包缺失, 指定设备不可用, IndexTTS-2.5 runtime 导入失败。 |
 | `4` | 推理或拼接失败 | 模型初始化, `infer` 执行或 WAV 写入替换过程中抛出异常。批量合成会停在第一条失败任务。 |
 
 错误信息写入 `stderr`, 成功信息写入 `stdout`。
@@ -759,9 +764,9 @@ ERROR: model directory does not exist: <resolved-model-resource-directory>
 Model directory: <resolved-model-resource-directory>
 Missing resources: model directory does not exist
 Download with HuggingFace:
-  huggingface-cli download IndexTeam/IndexTTS-2 --local-dir "<resolved-model-resource-directory>"
+  huggingface-cli download IndexTeam/IndexTTS-2.5 --local-dir "<resolved-model-resource-directory>"
 Download with ModelScope:
-  modelscope download --model IndexTeam/IndexTTS-2 --local_dir "<resolved-model-resource-directory>"
+  modelscope download --model IndexTeam/IndexTTS-2.5 --local_dir "<resolved-model-resource-directory>"
 Persist a different model resource directory:
   indextts2 config set model_dir <resolved-model-resource-directory>
 Hint: rerun indextts2 download or choose a different model resource directory.
@@ -782,13 +787,13 @@ indextts2 config set model_dir <existing-model-resource-directory>
 模型资源缺失:
 
 ```text
-ERROR: missing required model files: bpe.model, gpt.pth
+ERROR: missing required model files: multilingual_zh_ja_yue_char_del.tiktoken, gpt.pth
 Model directory: <resolved-model-resource-directory>
-Missing resources: bpe.model, gpt.pth
+Missing resources: multilingual_zh_ja_yue_char_del.tiktoken, gpt.pth
 Download with HuggingFace:
-  huggingface-cli download IndexTeam/IndexTTS-2 --local-dir "<resolved-model-resource-directory>"
+  huggingface-cli download IndexTeam/IndexTTS-2.5 --local-dir "<resolved-model-resource-directory>"
 Download with ModelScope:
-  modelscope download --model IndexTeam/IndexTTS-2 --local_dir "<resolved-model-resource-directory>"
+  modelscope download --model IndexTeam/IndexTTS-2.5 --local_dir "<resolved-model-resource-directory>"
 Persist a different model resource directory:
   indextts2 config set model_dir <resolved-model-resource-directory>
 Hint: rerun indextts2 download or choose a different model resource directory.
@@ -893,13 +898,13 @@ indextts2 download --source modelscope
 indextts2 init
 indextts2 download
 indextts2 check
-indextts2 synth --text "你好, IndexTTS2。" --voice examples/voice_01.wav --output outputs/hello.wav
+indextts2 synth --text "你好, IndexTTS-2.5。" --lang ZH --voice examples/voice_01.wav --output outputs/hello.wav
 ```
 
 使用已有模型资源目录:
 
 ```bash
-indextts2 config set model_dir D:/models/IndexTTS-2
+indextts2 config set model_dir D:/models/IndexTTS-2.5
 indextts2 check
 ```
 
@@ -915,7 +920,7 @@ indextts2 synth --text "GPU 推理测试。" --voice examples/voice_01.wav --out
 一次性覆盖模型资源目录或运行参数:
 
 ```bash
-indextts2 check --model-dir D:/models/IndexTTS-2 --device cuda:0
+indextts2 check --model-dir D:/models/IndexTTS-2.5 --device cuda:0
 indextts2 synth --text "GPU 推理测试。" --voice examples/voice_01.wav --output outputs/gpu.wav --device cuda:0 --fp16
 ```
 

@@ -19,28 +19,32 @@ EXIT_MISSING_RESOURCE = 2
 EXIT_RUNTIME_UNAVAILABLE = 3
 EXIT_INFERENCE_ERROR = 4
 
+MODEL_VERSION = "2.5"
+MODEL_REPO_ID = "IndexTeam/IndexTTS-2.5"
+
+# IndexTTS-2.5 has a different tokenizer and codec layout from IndexTTS-2.
+# Keep the CLI resource contract in one place so it cannot silently route a
+# 2.5 checkout through the 2.0 runtime again.
 REQUIRED_MODEL_FILES = (
     "config.yaml",
-    "bpe.model",
     "gpt.pth",
     "s2mel.pth",
+    "codec.pth",
     "wav2vec2bert_stats.pt",
     "feat1.pt",
     "feat2.pt",
+    "multilingual_zh_ja_yue_char_del.tiktoken",
+    "qwen0.6bemo4-merge/model.safetensors",
 )
-REQUIRED_MODEL_DIRS = (
-    "qwen0.6bemo4-merge",
-)
+REQUIRED_MODEL_DIRS = ()
 REQUIRED_AUX_MODEL_FILES = (
-    "hf_cache/semantic_codec_model.safetensors",
+    "hf_cache/semantic_codec/model.safetensors",
     "hf_cache/campplus_cn_common.bin",
     "hf_cache/bigvgan/config.json",
     "hf_cache/bigvgan/bigvgan_generator.pt",
+    "hf_cache/w2v-bert-2.0/model.safetensors",
 )
-REQUIRED_AUX_MODEL_DIRS = (
-    "hf_cache/w2v-bert-2.0",
-)
-MODEL_REPO_ID = "IndexTeam/IndexTTS-2"
+REQUIRED_AUX_MODEL_DIRS = ()
 REQUIRED_PACKAGES = ("torch", "torchaudio", "indextts")
 PERSISTED_CONFIG_KEYS = (
     "model_dir",
@@ -99,12 +103,12 @@ def main(argv=None, tts_factory=None, stdin=None):
 
 
 def _build_parser():
-    parser = argparse.ArgumentParser(prog="indextts2", description="IndexTTS2 command line")
+    parser = argparse.ArgumentParser(prog="indextts2", description="IndexTTS-2.5 command line")
     subparsers = parser.add_subparsers(dest="command")
 
     init = subparsers.add_parser(
         "init",
-        help="Create persistent IndexTTS2 CLI state without downloading model resources",
+        help="Create persistent IndexTTS-2.5 CLI state without downloading model resources",
     )
     init.add_argument(
         "--model-dir",
@@ -113,7 +117,7 @@ def _build_parser():
     )
     config = subparsers.add_parser(
         "config",
-        help="Show or update persistent IndexTTS2 CLI configuration",
+        help="Show or update persistent IndexTTS-2.5 CLI configuration",
     )
     config_subparsers = config.add_subparsers(dest="config_command")
     config_subparsers.add_parser("path", help="Print the persistent configuration file path")
@@ -124,7 +128,7 @@ def _build_parser():
 
     download = subparsers.add_parser(
         "download",
-        help="Download IndexTTS2 model resources",
+        help="Download IndexTTS-2.5 model resources",
     )
     download.add_argument(
         "--source",
@@ -135,7 +139,7 @@ def _build_parser():
     download.add_argument(
         "--model-dir",
         default=None,
-        help="Path to the IndexTTS2 model resource directory",
+        help="Path to the IndexTTS-2.5 model resource directory",
     )
     download.add_argument(
         "--no-save",
@@ -145,12 +149,12 @@ def _build_parser():
 
     check = subparsers.add_parser(
         "check",
-        help="Check local IndexTTS2 prerequisites without loading model weights",
+        help="Check local IndexTTS-2.5 prerequisites without loading model weights",
     )
     check.add_argument(
         "--model-dir",
         default=None,
-        help="Path to the IndexTTS2 model directory",
+        help="Path to the IndexTTS-2.5 model directory",
     )
     check.add_argument(
         "--device",
@@ -159,7 +163,7 @@ def _build_parser():
     )
     batch = subparsers.add_parser(
         "batch",
-        help="Validate a batch file and run batch synthesis",
+        help="Validate a batch file and run IndexTTS-2.5 synthesis",
     )
     batch.add_argument(
         "--batch-file",
@@ -169,7 +173,7 @@ def _build_parser():
     batch.add_argument(
         "--model-dir",
         default=None,
-        help="Path to the IndexTTS2 model directory",
+        help="Path to the IndexTTS-2.5 model directory",
     )
     batch.add_argument(
         "--dry-run",
@@ -189,7 +193,12 @@ def _build_parser():
     batch.add_argument("--output", help="Path to write concatenated batch WAV audio")
     batch.add_argument("--keep-temp", action="store_true", help="Keep internal batch concat temporary files")
     batch.add_argument("--device", default=None, help="Runtime device")
-    batch.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=None, help="Use FP16 inference")
+    batch.add_argument(
+        "--fp16",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Use half precision (IndexTTS-2.5 maps this to BF16 where supported; MPS keeps its compatible precision)",
+    )
     batch.add_argument("--deepspeed", action=argparse.BooleanOptionalAction, default=None, help="Use DeepSpeed")
     batch.add_argument("--cuda-kernel", action=argparse.BooleanOptionalAction, default=None, help="Use CUDA kernel")
     batch.add_argument("--accel", action=argparse.BooleanOptionalAction, default=None, help="Use GPT2 acceleration engine")
@@ -202,7 +211,13 @@ def _build_parser():
     batch.add_argument(
         "--emotion-weight",
         default="1.0",
-        help="Default emotion weight mapped to IndexTTS2 emo_alpha",
+        help="Default emotion weight mapped to IndexTTS-2.5 emo_alpha",
+    )
+    batch.add_argument(
+        "--lang",
+        choices=("ZH", "EN", "JA", "ES", "AR"),
+        default="ZH",
+        help="Language code for all batch rows",
     )
     concat = subparsers.add_parser(
         "concat",
@@ -222,7 +237,7 @@ def _build_parser():
     )
     synth = subparsers.add_parser(
         "synth",
-        help="Synthesize one text input with IndexTTS2",
+        help="Synthesize one text input with IndexTTS-2.5",
     )
     synth.add_argument("--text", help="Text to synthesize")
     synth.add_argument("--text-file", help="UTF-8 text file to synthesize")
@@ -234,17 +249,28 @@ def _build_parser():
     synth.add_argument(
         "--emotion-weight",
         default="1.0",
-        help="Emotion weight mapped to IndexTTS2 emo_alpha",
+        help="Emotion weight mapped to IndexTTS-2.5 emo_alpha",
     )
     synth.add_argument("--output", help="Path to write generated audio")
     synth.add_argument("--force", action="store_true", help="Overwrite output if it exists")
     synth.add_argument(
         "--model-dir",
         default=None,
-        help="Path to the IndexTTS2 model directory",
+        help="Path to the IndexTTS-2.5 model directory",
+    )
+    synth.add_argument(
+        "--lang",
+        choices=("ZH", "EN", "JA", "ES", "AR"),
+        default="ZH",
+        help="Language code for IndexTTS-2.5 synthesis",
     )
     synth.add_argument("--device", default=None, help="Runtime device")
-    synth.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=None, help="Use FP16 inference")
+    synth.add_argument(
+        "--fp16",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Use half precision (IndexTTS-2.5 maps this to BF16 where supported; MPS keeps its compatible precision)",
+    )
     synth.add_argument("--deepspeed", action=argparse.BooleanOptionalAction, default=None, help="Use DeepSpeed")
     synth.add_argument("--cuda-kernel", action=argparse.BooleanOptionalAction, default=None, help="Use CUDA kernel")
     synth.add_argument("--accel", action=argparse.BooleanOptionalAction, default=None, help="Use GPT2 acceleration engine")
@@ -492,12 +518,12 @@ def _default_model_dir():
     if sys.platform == "win32":
         root = os.environ.get("LOCALAPPDATA")
         base = Path(root) if root else Path.home() / "AppData" / "Local"
-        return base / "IndexTTS" / "models" / "IndexTTS-2"
+        return base / "IndexTTS" / "models" / "IndexTTS-2.5"
     if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / "IndexTTS" / "models" / "IndexTTS-2"
+        return Path.home() / "Library" / "Application Support" / "IndexTTS" / "models" / "IndexTTS-2.5"
     root = os.environ.get("XDG_DATA_HOME")
     base = Path(root) if root else Path.home() / ".local" / "share"
-    return base / "indextts" / "models" / "IndexTTS-2"
+    return base / "indextts" / "models" / "IndexTTS-2.5"
 
 
 def _run_synth(args, tts_factory=None, stdin=None):
@@ -569,17 +595,19 @@ def _run_synth(args, tts_factory=None, stdin=None):
             tts = tts_factory(
                 cfg_path=str(model_dir / "config.yaml"),
                 model_dir=str(model_dir),
-                use_fp16=runtime.fp16,
+                use_bf16=runtime.fp16,
                 device=runtime.device,
                 use_cuda_kernel=runtime.cuda_kernel,
                 use_deepspeed=runtime.deepspeed,
                 use_accel=runtime.accel,
                 use_torch_compile=runtime.torch_compile,
+                use_qwen_emo=True,
             )
             infer_kwargs = {
                 "spk_audio_prompt": str(voice_path),
                 "text": text,
                 "output_path": str(output_path),
+                "lang": args.lang,
                 "verbose": args.verbose,
             }
             if emotion_path is not None:
@@ -643,12 +671,13 @@ def _run_batch(args, tts_factory=None):
             tts = tts_factory(
                 cfg_path=str(model_dir / "config.yaml"),
                 model_dir=str(model_dir),
-                use_fp16=runtime.fp16,
+                use_bf16=runtime.fp16,
                 device=runtime.device,
                 use_cuda_kernel=runtime.cuda_kernel,
                 use_deepspeed=runtime.deepspeed,
                 use_accel=runtime.accel,
                 use_torch_compile=runtime.torch_compile,
+                use_qwen_emo=True,
             )
     except Exception as exc:
         print(f"ERROR: inference failed: {exc}", file=sys.stderr)
@@ -666,6 +695,7 @@ def _run_batch(args, tts_factory=None):
                     "spk_audio_prompt": str(task["voice_path"]),
                     "text": task["text"],
                     "output_path": str(output_path),
+                    "lang": args.lang,
                     "verbose": verbose,
                 }
                 infer_kwargs.update(task["emotion_kwargs"])
@@ -694,6 +724,7 @@ def _run_batch_concat(args, tasks, tts, verbose, output_path):
                         "spk_audio_prompt": str(task["voice_path"]),
                         "text": task["text"],
                         "output_path": str(segment_path),
+                        "lang": args.lang,
                         "verbose": verbose,
                     }
                     infer_kwargs.update(task["emotion_kwargs"])
@@ -1505,9 +1536,18 @@ def _parse_emotion_weight(value, label):
 def _load_indextts2(model_dir=None):
     if model_dir is not None:
         _configure_hf_cache(model_dir)
-    from indextts.infer_v2 import IndexTTS2
-
-    return IndexTTS2
+    # The local CLI is intentionally pinned to IndexTTS-2.5. Reuse the Mac
+    # compatibility wrapper so MPS handles the main model and BigVGAN stays on
+    # CPU where the long-output channel limit is avoided.
+    try:
+        from studio_engine import MacIndexTTS2
+    except ImportError:
+        from indextts.infer_v2_5 import IndexTTS2 as MacIndexTTS2
+    if model_dir is not None:
+        # infer_v2_5 historically set HF_HUB_CACHE at import time; restore the
+        # caller's model-specific cache after importing it.
+        _configure_hf_cache(model_dir)
+    return MacIndexTTS2
 
 
 def _configure_hf_cache(model_dir):
@@ -1539,6 +1579,7 @@ def _run_check(args):
         return EXIT_RUNTIME_UNAVAILABLE
 
     print(f"Checking model directory: {model_dir}")
+    print(f"Model version: IndexTTS-{MODEL_VERSION}")
     print(f"OK: model directory {model_dir}")
     print("OK: required model files")
     print("OK: python packages")
@@ -1549,6 +1590,14 @@ def _run_check(args):
 
 
 def _report_missing_model_resources(model_dir):
+    if _looks_like_index_tts_2_model(model_dir):
+        print(
+            "ERROR: this local CLI only supports IndexTTS-2.5; "
+            "the selected directory contains IndexTTS-2.0 resources.",
+            file=sys.stderr,
+        )
+        _print_model_resource_help(model_dir, "IndexTTS-2.0 directory is not supported")
+        return EXIT_MISSING_RESOURCE
     missing_files = _missing_model_files(model_dir)
     if missing_files is None:
         print(f"ERROR: model directory does not exist: {model_dir}", file=sys.stderr)
@@ -1571,7 +1620,7 @@ def _print_model_resource_help(model_dir, missing_summary):
     print(f'  modelscope download --model {MODEL_REPO_ID} --local_dir "{model_dir}"', file=sys.stderr)
     print("Persist a different model resource directory:", file=sys.stderr)
     print(f"  indextts2 config set model_dir {model_dir}", file=sys.stderr)
-    print("Hint: rerun indextts2 download or choose a different model resource directory.", file=sys.stderr)
+    print("Hint: rerun indextts2 download or choose a different IndexTTS-2.5 model directory.", file=sys.stderr)
 
 
 def _missing_model_files(model_dir):
@@ -1591,6 +1640,14 @@ def _missing_primary_model_resources(model_dir):
     missing_files = [filename for filename in REQUIRED_MODEL_FILES if not (model_dir / filename).is_file()]
     missing_dirs = [dirname for dirname in REQUIRED_MODEL_DIRS if not (model_dir / dirname).is_dir()]
     return missing_files + missing_dirs
+
+
+def _looks_like_index_tts_2_model(model_dir):
+    """Recognize the old tokenizer layout so it is never routed to 2.5."""
+    return (
+        (model_dir / "bpe.model").is_file()
+        and not (model_dir / "multilingual_zh_ja_yue_char_del.tiktoken").is_file()
+    )
 
 
 def _model_resource_path(model_dir, relative_path):

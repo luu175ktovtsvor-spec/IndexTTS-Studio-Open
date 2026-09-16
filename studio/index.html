@@ -876,6 +876,49 @@
         margin: 0;
         padding-left: 17px;
       }
+      .reference-transcript-action {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: 10px;
+      }
+      .reference-transcript-action small {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.4;
+      }
+      .reference-transcript {
+        display: grid;
+        gap: 7px;
+        margin-top: 10px;
+        padding: 10px 11px;
+        border: 1px solid rgba(174, 143, 255, 0.24);
+        border-radius: 12px;
+        background: rgba(103, 75, 177, 0.08);
+      }
+      .reference-transcript header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .reference-transcript strong {
+        color: #d9c7ff;
+      }
+      .reference-transcript small {
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+      .reference-transcript pre {
+        max-height: 180px;
+        margin: 0;
+        overflow: auto;
+        white-space: pre-wrap;
+        color: var(--text);
+        font: inherit;
+        font-size: 12px;
+        line-height: 1.65;
+      }
       .reference-quality.warning {
         border-color: rgba(255, 191, 100, 0.28);
         background: rgba(196, 126, 36, 0.08);
@@ -889,6 +932,10 @@
       }
       .reference-quality.poor strong {
         color: #ffaaa6;
+      }
+      #refresh-presets {
+        flex: 0 0 auto;
+        white-space: nowrap;
       }
       .preset-form {
         display: grid;
@@ -3095,7 +3142,7 @@
               </div>
               <article class="panel">
                 <div class="panel-body">
-                  <div class="identity">
+                  <div class="identity" id="voice-identity" hidden>
                     <span class="orb"></span
                     ><span
                       ><strong id="voice-name" dir="auto"
@@ -3216,6 +3263,30 @@
                     </header>
                     <ul id="reference-quality-issues"></ul>
                   </div>
+                  <div class="reference-transcript-action">
+                    <button
+                      class="quiet"
+                      id="transcribe-reference"
+                      type="button"
+                      disabled
+                    >
+                      转写当前 15 秒
+                    </button>
+                    <small>需要核对参考声音内容时再转写，不会自动执行。</small>
+                  </div>
+                  <div
+                    class="reference-transcript"
+                    id="reference-transcript"
+                    role="status"
+                    aria-live="polite"
+                    hidden
+                  >
+                    <header>
+                      <strong id="reference-transcript-title">参考声音转写</strong
+                      ><small id="reference-transcript-meta">—</small>
+                    </header>
+                    <pre id="reference-transcript-text"></pre>
+                  </div>
                   <p class="tip">
                     <b>提示</b
                     ><span
@@ -3229,7 +3300,7 @@
                   <div>
                     <h3 class="panel-title">已保存的声音</h3>
                     <p class="panel-subtitle">
-                      保存后会记住音色、表演方式和精细设置。
+                      保存音色和设置；未导入声音时，点击保存可选择本地文件。
                     </p>
                   </div>
                   <button class="quiet" id="refresh-presets" type="button">
@@ -3254,9 +3325,7 @@
                       保存
                     </button>
                   </div>
-                  <div class="list" id="presets">
-                    <div class="preset-row"><span>尚无保存的预设</span></div>
-                  </div>
+                  <div class="list" id="presets" hidden></div>
                 </div>
               </article>
             </section>
@@ -4118,6 +4187,9 @@
         referenceQuality: null,
         referenceQualityRequestId: 0,
         referenceQualityTimer: null,
+        referenceTranscript: null,
+        referenceTranscriptRequestId: 0,
+        transcribingReference: false,
         generationState: "idle",
         generationTitle: "等待生成",
         generationDetail: "模型准备好后即可开始。",
@@ -4137,6 +4209,7 @@
         },
         statusStream: null,
         savingPreset: false,
+        pendingPresetSave: null,
         verifyingModel: false,
         presetConfirmAction: null,
         presetConfirmReturnFocus: null,
@@ -4322,28 +4395,40 @@
       }
       function updateActions() {
         const textLength = [...$("text").value.trim()].length;
-        const ready = Boolean(
+        const referenceReady = Boolean(
           state.voiceFile &&
+          state.referenceQuality !== null &&
           state.referenceQuality?.fatal !== true &&
           textLength &&
           textLength <= MAX_TEXT_CHARS,
         );
         const presetName = $("preset-name").value.trim();
+        const canSavePreset = Boolean(
+          state.referenceQuality?.fatal !== true &&
+          presetName &&
+          presetName.length <= 60,
+        );
         const busy =
           state.generationState === "queued" ||
           state.generationState === "generating" ||
           state.generationState === "cancelling";
         $("generate").disabled =
           busy ||
-          !ready ||
+          !referenceReady ||
           state.serviceAvailable === false ||
           state.modelAvailable === false;
         $("verify-model").disabled = state.verifyingModel || busy;
-        $("save-preset-confirm").disabled =
-          state.savingPreset ||
-          !state.voiceFile ||
-          !presetName ||
-          presetName.length > 60;
+        $("transcribe-reference").disabled =
+          !state.voiceFile || state.transcribingReference;
+        $("save-preset-confirm").disabled = state.savingPreset || !canSavePreset;
+        const saveLabel = tr(
+          state.voiceFile ? "保存当前声音" : "选择本地文件后保存",
+        );
+        $("save-preset-confirm").title = saveLabel;
+        $("save-preset-confirm").setAttribute(
+          "aria-label",
+          saveLabel,
+        );
         const hasAudio = Boolean(state.audioUrl);
         ["audio-play", "audio-progress", "audio-volume", "download"].forEach(
           (id) => ($(id).disabled = !hasAudio),
@@ -4632,6 +4717,8 @@
       function setVoice(file) {
         state.voiceFile = file || null;
         state.referenceQuality = null;
+        clearReferenceTranscript();
+        $("voice-identity").hidden = !file;
         const source = $("source-audio");
         if (state.sourceUrl) URL.revokeObjectURL(state.sourceUrl);
         state.sourceUrl = null;
@@ -4656,6 +4743,7 @@
           );
           $("voice-state").classList.remove("ready");
           updateWorkflow();
+          updateActions();
           return;
         }
         state.sourceDuration = 0;
@@ -4679,6 +4767,7 @@
         $("voice-state").classList.add("ready");
         scheduleReferenceQuality();
         updateWorkflow();
+        updateActions();
       }
       function renderReferenceQuality(result) {
         const card = $("reference-quality"),
@@ -4761,8 +4850,76 @@
           }
         }, 420);
       }
+      function clearReferenceTranscript() {
+        state.referenceTranscriptRequestId += 1;
+        state.referenceTranscript = null;
+        state.transcribingReference = false;
+        $("reference-transcript").hidden = true;
+        uiText("reference-transcript-title", "参考声音转写");
+        $("reference-transcript-meta").textContent = "—";
+        $("reference-transcript-text").textContent = "";
+        uiText("transcribe-reference", "转写当前 15 秒");
+      }
+      function renderReferenceTranscript(result) {
+        const card = $("reference-transcript");
+        card.hidden = false;
+        state.referenceTranscript = result;
+        const text = String(result?.text || "").trim();
+        if (!text) {
+          uiText("reference-transcript-title", "没有识别到可用文本");
+          $("reference-transcript-meta").textContent = "当前 15 秒";
+          $("reference-transcript-text").textContent =
+            "这段参考声音没有识别到连续口语。";
+          return;
+        }
+        uiText("reference-transcript-title", "参考声音转写");
+        $("reference-transcript-meta").textContent =
+          (result.language || "auto") +
+          " · " +
+          Math.round(Number(result.windowSeconds) || 15) +
+          " s";
+        $("reference-transcript-text").textContent = text;
+      }
+      async function transcribeReference() {
+        const file = state.voiceFile;
+        if (!file || state.transcribingReference) return;
+        const requestId = ++state.referenceTranscriptRequestId;
+        state.transcribingReference = true;
+        $("reference-transcript").hidden = false;
+        uiText("reference-transcript-title", "正在转写当前 15 秒");
+        $("reference-transcript-meta").textContent = "完整 ASR";
+        $("reference-transcript-text").textContent = "请稍候…";
+        uiText("transcribe-reference", "正在转写…");
+        updateActions();
+        const form = new FormData();
+        form.append("reference_start", $("reference-start").value || "0");
+        form.append("prompt_audio", file);
+        try {
+          const result = await jsonRequest(
+            "/api/reference-transcript",
+            { method: "POST", body: form },
+            "参考声音转写失败",
+          );
+          if (requestId !== state.referenceTranscriptRequestId) return;
+          renderReferenceTranscript(result);
+        } catch (error) {
+          if (requestId !== state.referenceTranscriptRequestId) return;
+          $("reference-transcript").hidden = false;
+          uiText("reference-transcript-title", "参考声音转写失败");
+          $("reference-transcript-meta").textContent = "—";
+          $("reference-transcript-text").textContent =
+            error.message || "请检查完整 ASR 模型后重试。";
+        } finally {
+          if (requestId === state.referenceTranscriptRequestId) {
+            state.transcribingReference = false;
+            uiText("transcribe-reference", "转写当前 15 秒");
+            updateActions();
+          }
+        }
+      }
       function clearVoice() {
         state.resourceLoadId += 1;
+        state.pendingPresetSave = null;
         $("voice-file").value = "";
         setVoice(null);
       }
@@ -4788,6 +4945,9 @@
         return "";
       }
       function acceptVoiceFile(file) {
+        const pendingSave = state.pendingPresetSave;
+        state.pendingPresetSave = null;
+        if (!file) return;
         if (!isSupportedMediaFile(file)) {
           $("voice-file").value = "";
           toast("请导入常见音频或视频格式。", true);
@@ -4801,6 +4961,7 @@
         }
         state.resourceLoadId += 1;
         setVoice(file);
+        if (pendingSave) void savePreset(pendingSave.overwrite);
       }
       function setEmotionFile(file, keepInput) {
         state.emotionFile = file || null;
@@ -5578,13 +5739,11 @@
           );
           holder.replaceChildren();
           if (!names.length) {
-            const row = document.createElement("div");
-            row.className = "preset-row";
-            row.textContent = tr("尚无保存的预设");
-            holder.append(row);
+            holder.hidden = true;
             filterResources();
             return;
           }
+          holder.hidden = false;
           names.forEach((name) => {
             const row = document.createElement("div"),
               label = document.createElement("span"),
@@ -5607,6 +5766,7 @@
           filterResources();
         } catch (error) {
           holder.replaceChildren();
+          holder.hidden = false;
           const row = document.createElement("div");
           row.className = "preset-row";
           row.textContent = tr("暂时无法读取预设");
@@ -5790,9 +5950,15 @@
         }
       }
       async function savePreset(overwrite = false) {
-        if (!state.voiceFile) return toast("先添加一段参考声音。", true);
+        if (state.savingPreset) return;
         const name = $("preset-name").value.trim();
         if (!name) return toast("先给这个声音取一个名字。", true);
+        if (!state.voiceFile) {
+          state.pendingPresetSave = { overwrite };
+          toast("请选择本地音频或视频，选择后会继续保存。", false);
+          $("voice-file").click();
+          return;
+        }
         const form = new FormData();
         form.append("name", name);
         form.append("settings", JSON.stringify(settings()));
@@ -6576,6 +6742,10 @@
           }),
         );
         $("remove-voice").addEventListener("click", clearVoice);
+        $("transcribe-reference").addEventListener(
+          "click",
+          transcribeReference,
+        );
         $("record").addEventListener("click", toggleRecording);
         $("record-dialog-close").addEventListener("click", closeRecordDialog);
         $("record-dialog-cancel").addEventListener("click", closeRecordDialog);
@@ -6678,6 +6848,7 @@
           updateReferenceStart();
           if (source.duration)
             source.currentTime = Number($("reference-start").value);
+          clearReferenceTranscript();
           scheduleReferenceQuality();
         });
         const languagePicker = $("language-picker"),
@@ -6913,6 +7084,9 @@
           }
         });
         $("preset-name").addEventListener("input", updateActions);
+        $("voice-file").addEventListener("cancel", () => {
+          state.pendingPresetSave = null;
+        });
         $("save-preset-confirm").addEventListener("click", () =>
           savePreset(false),
         );

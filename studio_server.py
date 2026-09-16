@@ -34,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from tqdm import tqdm
 
 from indextts.utils.examples_downloader import ensure_examples_available
 from indextts.utils.model_integrity import (
@@ -49,6 +50,10 @@ from indextts.utils.presets import (
     save_preset,
 )
 from studio_engine import MacIndexTTS2
+
+# Studio runs inference in daemon threads. Use a thread lock so tqdm does not
+# allocate a multiprocessing semaphore that survives service shutdown on macOS.
+tqdm.set_lock(threading.RLock())
 
 ROOT = Path(__file__).resolve().parent
 CHECKPOINTS = (
@@ -71,6 +76,10 @@ MAX_HISTORY_ITEMS = 100
 MAX_HISTORY_BYTES = 5 * 1024 * 1024 * 1024
 REFERENCE_WINDOW_SECONDS = 15.0
 MAX_REFERENCE_START_SECONDS = 24 * 60 * 60
+REFERENCE_TRANSCRIPTION_TIMEOUT_SECONDS = 120
+REFERENCE_TRANSCRIPTION_COMMAND = os.environ.get(
+    "INDEXTTS_REFERENCE_TRANSCRIPTION_COMMAND", "whisper-best"
+)
 OUTPUT_TARGET_LOUDNESS_LUFS = -18
 OUTPUT_TRUE_PEAK_DBFS = -2
 VIDEO_MEDIA_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv"}
@@ -739,6 +748,68 @@ def _analyze_reference_audio(path: str | Path) -> dict[str, Any]:
     }
 
 
+def _transcribe_reference_audio(path: str | Path) -> dict[str, Any]:
+    """Transcribe the already-normalized 15-second reference window locally."""
+    command_path = shutil.which(REFERENCE_TRANSCRIPTION_COMMAND)
+    if not command_path:
+        raise RuntimeError(
+            "未找到全局完整 ASR 命令 whisper-best，请先完成本机转写工具配置"
+        )
+    with tempfile.TemporaryDirectory(prefix="indextts-reference-asr-") as temp_dir:
+        output_base = Path(temp_dir) / "reference-transcript"
+        try:
+            subprocess.run(
+                [
+                    command_path,
+                    "-f",
+                    str(path),
+                    "-l",
+                    "auto",
+                    "-ojf",
+                    "-of",
+                    str(output_base),
+                    "-np",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=REFERENCE_TRANSCRIPTION_TIMEOUT_SECONDS,
+            )
+            payload = json.loads(
+                output_base.with_suffix(".json").read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+            raise RuntimeError("参考声音转写失败，请检查完整 ASR 模型是否可用") from error
+    raw_segments = payload.get("transcription")
+    if not isinstance(raw_segments, list):
+        raw_segments = []
+    segments = []
+    for item in raw_segments:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text") or "").strip()
+        offsets = item.get("offsets") if isinstance(item.get("offsets"), dict) else {}
+        start = float(offsets.get("from") or 0) / 1000
+        end = float(offsets.get("to") or 0) / 1000
+        if text:
+            segments.append(
+                {
+                    "start": round(start, 2),
+                    "end": round(end, 2),
+                    "text": text,
+                }
+            )
+    transcript = "\n".join(segment["text"] for segment in segments).strip()
+    return {
+        "text": transcript,
+        "segments": segments,
+        "language": str((payload.get("result") or {}).get("language") or "").lower() or None,
+        "windowSeconds": REFERENCE_WINDOW_SECONDS,
+    }
+
+
 def _split_narration_units(
     text: str,
     sentence_pause_ms: int,
@@ -1181,6 +1252,30 @@ async def reference_quality(
         if not prompt_path:
             raise HTTPException(status_code=400, detail="请先添加参考声音")
         return _analyze_reference_audio(prompt_path)
+    finally:
+        _remove_temporary_uploads(prompt_path)
+
+
+@app.post("/api/reference-transcript")
+async def reference_transcript(
+    reference_start: float = Form(0.0),
+    prompt_audio: UploadFile | None = File(None),
+) -> dict[str, Any]:
+    if not math.isfinite(reference_start):
+        reference_start = 0.0
+    reference_start = max(0.0, min(reference_start, MAX_REFERENCE_START_SECONDS))
+    prompt_path = None
+    try:
+        prompt_path = _save_upload(
+            prompt_audio,
+            "reference-transcript",
+            start_seconds=reference_start,
+        )
+        if not prompt_path:
+            raise HTTPException(status_code=400, detail="请先添加参考声音")
+        return await _run_in_daemon_thread(_transcribe_reference_audio, prompt_path)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     finally:
         _remove_temporary_uploads(prompt_path)
 

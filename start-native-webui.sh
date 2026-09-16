@@ -10,6 +10,27 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
+# The open checkout intentionally omits large model weights. When a complete
+# local checkout is beside it, reuse those weights without copying them into
+# the open tree. An explicit environment variable always wins.
+if [[ -z "${INDEXTTS_CHECKPOINTS_DIR:-}" ]]; then
+  app_root="$(pwd -P)"
+  for candidate in \
+    "${app_root}/checkpoints" \
+    "${app_root}/../IndexTTS/checkpoints" \
+    "${HOME}/Applications/IndexTTS/checkpoints"; do
+    if [[ -f "${candidate}/config.yaml" &&
+          -f "${candidate}/gpt.pth" &&
+          -f "${candidate}/s2mel.pth" &&
+          -f "${candidate}/multilingual_zh_ja_yue_char_del.tiktoken" ]]; then
+      INDEXTTS_CHECKPOINTS_DIR="$(cd "${candidate}" && pwd -P)"
+      export INDEXTTS_CHECKPOINTS_DIR
+      echo "Using local IndexTTS model checkpoints: ${INDEXTTS_CHECKPOINTS_DIR}"
+      break
+    fi
+  done
+fi
+
 NATIVE_PORT="${INDEXTTS_NATIVE_WEBUI_PORT:-7861}"
 if ! [[ "$NATIVE_PORT" =~ ^[0-9]+$ ]] || ((NATIVE_PORT < 1 || NATIVE_PORT > 65535)); then
   echo "The native WebUI port must be a number from 1 to 65535."

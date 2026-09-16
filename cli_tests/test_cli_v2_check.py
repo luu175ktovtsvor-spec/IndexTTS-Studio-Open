@@ -24,32 +24,34 @@ def _mock_optional_dependency_imports():
 
 REQUIRED_MODEL_FILES = [
     "config.yaml",
-    "bpe.model",
     "gpt.pth",
     "s2mel.pth",
+    "codec.pth",
     "wav2vec2bert_stats.pt",
     "feat1.pt",
     "feat2.pt",
+    "multilingual_zh_ja_yue_char_del.tiktoken",
+    "qwen0.6bemo4-merge/model.safetensors",
 ]
-REQUIRED_MODEL_DIRS = [
-    "qwen0.6bemo4-merge",
-]
+REQUIRED_MODEL_DIRS = []
 AUX_MODEL_FILES = [
     "hf_cache/semantic_codec_model.safetensors",
+    "hf_cache/semantic_codec/model.safetensors",
     "hf_cache/campplus_cn_common.bin",
     "hf_cache/bigvgan/config.json",
     "hf_cache/bigvgan/bigvgan_generator.pt",
+    "hf_cache/w2v-bert-2.0/model.safetensors",
 ]
-AUX_MODEL_DIRS = [
-    "hf_cache/w2v-bert-2.0",
-]
+AUX_MODEL_DIRS = []
 
 
 def make_model_dir(base_dir, include_aux=True):
     model_dir = base_dir / "checkpoints"
     model_dir.mkdir()
     for filename in REQUIRED_MODEL_FILES:
-        (model_dir / filename).write_text("placeholder", encoding="utf-8")
+        target = model_dir / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("placeholder", encoding="utf-8")
     for dirname in REQUIRED_MODEL_DIRS:
         (model_dir / dirname).mkdir()
     if include_aux:
@@ -71,8 +73,8 @@ def make_aux_model_cache(model_dir):
 def assert_model_resource_help(test_case, stderr, model_dir):
     test_case.assertIn(f"Model directory: {model_dir}", stderr)
     test_case.assertIn("Missing resources:", stderr)
-    test_case.assertIn("huggingface-cli download IndexTeam/IndexTTS-2", stderr)
-    test_case.assertIn("modelscope download --model IndexTeam/IndexTTS-2", stderr)
+    test_case.assertIn("huggingface-cli download IndexTeam/IndexTTS-2.5", stderr)
+    test_case.assertIn("modelscope download --model IndexTeam/IndexTTS-2.5", stderr)
     test_case.assertIn(f"indextts2 config set model_dir {model_dir}", stderr)
 
 
@@ -144,6 +146,31 @@ class CheckCommandTests(unittest.TestCase):
         self.assertIn('indextts = "indextts.cli:main"', pyproject)
         self.assertIn('indextts2 = "indextts.cli_v2:main"', pyproject)
 
+    def test_cli_is_pinned_to_index_tts_25(self):
+        from indextts import cli_v2
+
+        self.assertEqual(cli_v2.MODEL_VERSION, "2.5")
+        self.assertEqual(cli_v2.MODEL_REPO_ID, "IndexTeam/IndexTTS-2.5")
+        self.assertTrue(cli_v2._default_model_dir().as_posix().endswith("IndexTTS-2.5"))
+
+    def test_check_rejects_index_tts_2_model_resources(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_dir = Path(temp_dir).resolve() / "legacy-checkpoints"
+            model_dir.mkdir()
+            (model_dir / "bpe.model").write_bytes(b"legacy")
+
+            from indextts.cli_v2 import main
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                exit_code = main(["check", "--model-dir", str(model_dir)])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("only supports IndexTTS-2.5", stderr.getvalue())
+        self.assertIn("IndexTTS-2.0 resources", stderr.getvalue())
+
     def test_check_returns_success_when_resources_packages_and_requested_device_are_available(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             model_dir = make_model_dir(Path(temp_dir).resolve())
@@ -196,7 +223,7 @@ class CheckCommandTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertEqual(stdout.getvalue(), "")
             self.assertIn("ERROR: missing required model files", stderr.getvalue())
-            self.assertIn("bpe.model", stderr.getvalue())
+            self.assertIn("codec.pth", stderr.getvalue())
             self.assertIn("gpt.pth", stderr.getvalue())
             assert_model_resource_help(self, stderr.getvalue(), model_dir)
 
@@ -206,7 +233,7 @@ class CheckCommandTests(unittest.TestCase):
             model_dir.mkdir()
             for filename in [
                 "config.yaml",
-                "bpe.model",
+                "codec.pth",
                 "gpt.pth",
                 "s2mel.pth",
                 "wav2vec2bert_stats.pt",
@@ -240,8 +267,8 @@ class CheckCommandTests(unittest.TestCase):
             self.assertEqual(exit_code, 2)
             self.assertEqual(stdout.getvalue(), "")
             self.assertIn("ERROR: missing required model files", stderr.getvalue())
-            self.assertIn("hf_cache/w2v-bert-2.0", stderr.getvalue())
-            self.assertIn("hf_cache/semantic_codec_model.safetensors", stderr.getvalue())
+            self.assertIn("hf_cache/w2v-bert-2.0/model.safetensors", stderr.getvalue())
+            self.assertIn("hf_cache/semantic_codec/model.safetensors", stderr.getvalue())
             self.assertIn("hf_cache/campplus_cn_common.bin", stderr.getvalue())
             self.assertIn("hf_cache/bigvgan/config.json", stderr.getvalue())
             self.assertIn("hf_cache/bigvgan/bigvgan_generator.pt", stderr.getvalue())
@@ -251,11 +278,15 @@ class CheckCommandTests(unittest.TestCase):
             model_dir = Path(temp_dir).resolve() / "checkpoints"
             model_dir.mkdir()
             for filename in REQUIRED_MODEL_FILES:
+                target = model_dir / filename
                 if filename == "gpt.pth":
-                    (model_dir / filename).mkdir()
+                    target.mkdir()
                 else:
-                    (model_dir / filename).write_text("placeholder", encoding="utf-8")
-            (model_dir / "qwen0.6bemo4-merge").write_text("placeholder", encoding="utf-8")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("placeholder", encoding="utf-8")
+            qwen_model = model_dir / "qwen0.6bemo4-merge" / "model.safetensors"
+            qwen_model.unlink()
+            qwen_model.mkdir()
 
             from indextts.cli_v2 import main
 
@@ -416,12 +447,13 @@ class SynthCommandTests(unittest.TestCase):
                     {
                         "cfg_path": str(temp_path / "checkpoints" / "config.yaml"),
                         "model_dir": str(temp_path / "checkpoints"),
-                        "use_fp16": False,
+                        "use_bf16": False,
                         "device": None,
                         "use_cuda_kernel": False,
                         "use_deepspeed": False,
                         "use_accel": False,
                         "use_torch_compile": False,
+                        "use_qwen_emo": True,
                     },
                 ),
                 (
@@ -430,6 +462,7 @@ class SynthCommandTests(unittest.TestCase):
                         "spk_audio_prompt": str(voice_path),
                         "text": "hello",
                         "output_path": str(output_path),
+                        "lang": "ZH",
                         "verbose": False,
                     },
                 ),
@@ -1207,12 +1240,13 @@ class SynthCommandTests(unittest.TestCase):
             {
                 "cfg_path": str(model_dir / "config.yaml"),
                 "model_dir": str(model_dir),
-                "use_fp16": True,
+                "use_bf16": True,
                 "device": "cuda:0",
                 "use_cuda_kernel": True,
                 "use_deepspeed": True,
                 "use_accel": True,
                 "use_torch_compile": True,
+                "use_qwen_emo": True,
             },
         )
         self.assertTrue(calls[1][1]["verbose"])
@@ -1329,7 +1363,7 @@ class SynthCommandTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(stdout, "")
         self.assertIn("ERROR: missing required model files", stderr)
-        self.assertIn("bpe.model", stderr)
+        self.assertIn("codec.pth", stderr)
         assert_model_resource_help(self, stderr, model_dir)
         self.assertEqual(calls, [])
 
@@ -1377,7 +1411,7 @@ class SynthCommandTests(unittest.TestCase):
             with mock.patch.dict(os.environ, {"HF_HUB_CACHE": "legacy-cache"}, clear=False):
                 with mock.patch.dict(
                     sys.modules,
-                    {"indextts.infer_v2": SimpleNamespace(IndexTTS2=FakeIndexTTS2)},
+                    {"studio_engine": SimpleNamespace(MacIndexTTS2=FakeIndexTTS2)},
                     clear=False,
                 ):
                     loaded = _load_indextts2(model_dir)

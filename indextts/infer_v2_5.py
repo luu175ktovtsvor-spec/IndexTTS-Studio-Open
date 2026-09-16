@@ -1,7 +1,9 @@
 import os
 from subprocess import CalledProcessError
 
-os.environ['HF_HUB_CACHE'] = './checkpoints/hf_cache'
+# Keep an explicitly selected model cache (for example from the CLI) intact;
+# the repository-relative path remains the fallback for direct local runs.
+os.environ.setdefault('HF_HUB_CACHE', './checkpoints/hf_cache')
 import json
 import re
 import time

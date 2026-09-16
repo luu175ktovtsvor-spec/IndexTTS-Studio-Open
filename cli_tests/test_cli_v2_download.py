@@ -10,31 +10,33 @@ from unittest import mock
 
 REQUIRED_MODEL_FILES = [
     "config.yaml",
-    "bpe.model",
     "gpt.pth",
     "s2mel.pth",
+    "codec.pth",
     "wav2vec2bert_stats.pt",
     "feat1.pt",
     "feat2.pt",
+    "multilingual_zh_ja_yue_char_del.tiktoken",
+    "qwen0.6bemo4-merge/model.safetensors",
 ]
-REQUIRED_MODEL_DIRS = [
-    "qwen0.6bemo4-merge",
-]
+REQUIRED_MODEL_DIRS = []
 AUX_MODEL_FILES = [
     "hf_cache/semantic_codec_model.safetensors",
+    "hf_cache/semantic_codec/model.safetensors",
     "hf_cache/campplus_cn_common.bin",
     "hf_cache/bigvgan/config.json",
     "hf_cache/bigvgan/bigvgan_generator.pt",
+    "hf_cache/w2v-bert-2.0/model.safetensors",
 ]
-AUX_MODEL_DIRS = [
-    "hf_cache/w2v-bert-2.0",
-]
+AUX_MODEL_DIRS = []
 
 
 def make_model_dir(path, include_aux=True):
     path.mkdir(parents=True, exist_ok=True)
     for filename in REQUIRED_MODEL_FILES:
-        (path / filename).write_text("placeholder", encoding="utf-8")
+        target = path / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("placeholder", encoding="utf-8")
     for dirname in REQUIRED_MODEL_DIRS:
         (path / dirname).mkdir(exist_ok=True)
     if include_aux:
@@ -60,14 +62,14 @@ def user_state_paths(temp_path):
                 "LOCALAPPDATA": str(temp_path / "local"),
             },
             "config_path": temp_path / "roaming" / "IndexTTS" / "config.toml",
-            "model_dir": temp_path / "local" / "IndexTTS" / "models" / "IndexTTS-2",
+            "model_dir": temp_path / "local" / "IndexTTS" / "models" / "IndexTTS-2.5",
         }
     if sys.platform == "darwin":
         app_support = temp_path / "Library" / "Application Support" / "IndexTTS"
         return {
             "env": {"HOME": str(temp_path)},
             "config_path": app_support / "config.toml",
-            "model_dir": app_support / "models" / "IndexTTS-2",
+            "model_dir": app_support / "models" / "IndexTTS-2.5",
         }
     return {
         "env": {
@@ -75,7 +77,7 @@ def user_state_paths(temp_path):
             "XDG_DATA_HOME": str(temp_path / "data"),
         },
         "config_path": temp_path / "config" / "indextts" / "config.toml",
-        "model_dir": temp_path / "data" / "indextts" / "models" / "IndexTTS-2",
+        "model_dir": temp_path / "data" / "indextts" / "models" / "IndexTTS-2.5",
     }
 
 
@@ -114,7 +116,7 @@ class DownloadCommandTests(unittest.TestCase):
                 config_exists = state["config_path"].exists()
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [("IndexTeam/IndexTTS-2", state["model_dir"])])
+        self.assertEqual(calls, [("IndexTeam/IndexTTS-2.5", state["model_dir"])])
         self.assertEqual(aux_calls, [state["model_dir"]])
         self.assertIn(f"Downloaded model resources to: {state['model_dir']}", stdout)
         self.assertEqual(stderr, "")
@@ -140,7 +142,7 @@ class DownloadCommandTests(unittest.TestCase):
                 config_text = state["config_path"].read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [("IndexTeam/IndexTTS-2", model_dir)])
+        self.assertEqual(calls, [("IndexTeam/IndexTTS-2.5", model_dir)])
         self.assertIn(f"Downloaded model resources to: {model_dir}", stdout)
         self.assertEqual(stderr, "")
         self.assertIn(f'model_dir = "{model_dir.as_posix()}"', config_text)
@@ -168,7 +170,7 @@ class DownloadCommandTests(unittest.TestCase):
                 sentinel_text = sentinel.read_text(encoding="utf-8")
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(calls, [("IndexTeam/IndexTTS-2", model_dir, True)])
+        self.assertEqual(calls, [("IndexTeam/IndexTTS-2.5", model_dir, True)])
         self.assertEqual(sentinel_text, "keep")
         self.assertIn(f"Downloaded model resources to: {model_dir}", stdout)
         self.assertEqual(stderr, "")
@@ -251,7 +253,7 @@ class DownloadCommandTests(unittest.TestCase):
         self.assertEqual(exit_code, 2)
         self.assertEqual(stdout, "")
         self.assertIn("ERROR: missing required model files", stderr)
-        self.assertIn("bpe.model", stderr)
+        self.assertIn("codec.pth", stderr)
         self.assertIn("qwen0.6bemo4-merge", stderr)
         self.assertIn(f"Model directory: {model_dir}", stderr)
         self.assertIn("Missing resources:", stderr)
